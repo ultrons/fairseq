@@ -16,7 +16,7 @@ import os
 import re
 import sys
 
-from tqdm import tqdm
+#from tqdm import tqdm
 
 from fairseq import distributed_utils
 from fairseq.meters import AverageMeter, StopwatchMeter, TimeMeter
