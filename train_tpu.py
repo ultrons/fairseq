@@ -191,7 +191,7 @@ def train_loop_fn (model, loader, device='cpu?', context=None):
         task.train_step(samples[0], model, criterion, optimizer,False)
         xm.optimizer_step(optimizer)
         print("Rate: {}".format(tracker.rate()))
-        print(torch_xla._XLAC._xla_metrics_report())
+        # print(torch_xla._XLAC._xla_metrics_report())
 
 # Print some samples from train_loader
 print(next(train_loader))
