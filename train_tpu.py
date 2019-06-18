@@ -186,6 +186,7 @@ def train_loop_fn (model, loader, device='cpu?', context=None):
     criterion = task.build_criterion(args)
     tracker = xm.RateTracker()
     optimizer = build_optimizer(args, model)
+    print('There are 35 batches in 1 epoch')
     for i, samples in loader:
         print("Processing minibatch:%d for device %s" % (i, device.index))
         task.train_step(samples[0], model, criterion, optimizer,False)
@@ -194,7 +195,7 @@ def train_loop_fn (model, loader, device='cpu?', context=None):
         # print(torch_xla._XLAC._xla_metrics_report())
 
 # Print some samples from train_loader
-print(next(train_loader))
+#print(next(train_loader))
 
 # Run training from one epoch
 model_parallel(train_loop_fn, train_loader)
