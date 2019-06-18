@@ -464,10 +464,11 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         dim = tensor.size(0)
         if not hasattr(self, '_future_mask') or self._future_mask is None or self._future_mask.device != tensor.device:
             dim2 = dim * 2
-            print('buffered_future_mask: I got {}*2={} as my initial dimension').format(dim, dim2)
+            print('buffered_future_mask: I got {}*2={} as my initial dimension'.format(dim, dim2))
             self._future_mask = torch.triu(utils.fill_with_neg_inf(tensor.new(dim2, dim2)), 1)
         else:
           print('buffered_future_mask: I got {} as input dimension.'.format(dim))
+            self._future_mask = torch.triu(utils.fill_with_neg_inf(tensor.new(dim2, dim2)), 1)
 
         #  dim = tensor.size(0)
         #  if not hasattr(self, '_future_mask') or self._future_mask is None or self._future_mask.device != tensor.device:
