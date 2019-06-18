@@ -194,7 +194,11 @@ class MultiheadAttention(nn.Module):
             attn_mask = attn_mask.unsqueeze(0)
             if self.onnx_trace:
                 attn_mask = attn_mask.repeat(attn_weights.size(0), 1, 1)
-            attn_weights += attn_mask
+            try:
+              attn_weights += attn_mask
+            except RuntimeError:
+              from fairseq import pdb
+              pdb.set_trace()
 
         if key_padding_mask is not None:
             # don't attend to padding symbols
