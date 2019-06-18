@@ -462,9 +462,14 @@ class TransformerDecoder(FairseqIncrementalDecoder):
 
     def buffered_future_mask(self, tensor):
         dim = tensor.size(0)
+        from fairseq import pdb
         if not hasattr(self, '_future_mask') or self._future_mask is None or self._future_mask.device != tensor.device:
+            print('I didnt have _future_mask and now I have!')
             self._future_mask = torch.triu(utils.fill_with_neg_inf(tensor.new(dim, dim)), 1)
+            pdb.set_trace()
         if self._future_mask.size(0) < dim:
+            print('I had _future_mask and its size was smaller than dim')
+            pdb.set_trace()
             self._future_mask = torch.triu(utils.fill_with_neg_inf(self._future_mask.resize_(dim, dim)), 1)
         return self._future_mask[:dim, :dim]
 
