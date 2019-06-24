@@ -31,24 +31,32 @@ def load_ensemble_for_inference(filenames, task, model_arg_overrides=None):
     )
 
 
-def move_to_cuda(sample):
+def apply_to_sample(f, sample):
     if len(sample) == 0:
         return {}
 
-    def _move_to_cuda(maybe_tensor):
-        if torch.is_tensor(maybe_tensor):
-            return maybe_tensor.cuda()
-        elif isinstance(maybe_tensor, dict):
+    def _apply(x):
+        if torch.is_tensor(x):
+            return f(x)
+        elif isinstance(x, dict):
             return {
-                key: _move_to_cuda(value)
-                for key, value in maybe_tensor.items()
+                key: _apply(value)
+                for key, value in x.items()
             }
-        elif isinstance(maybe_tensor, list):
-            return [_move_to_cuda(x) for x in maybe_tensor]
+        elif isinstance(x, list):
+            return [_apply(x) for x in x]
         else:
-            return maybe_tensor
+            return x
 
-    return _move_to_cuda(sample)
+    return _apply(sample)
+
+
+def move_to_cuda(sample):
+
+    def _move_to_cuda(tensor):
+        return tensor.cuda()
+
+    return apply_to_sample(_move_to_cuda, sample)
 
 
 INCREMENTAL_STATE_INSTANCE_ID = defaultdict(lambda: 0)
