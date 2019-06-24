@@ -1,10 +1,53 @@
 import collections
-import math
 import os
-import random
-import shutil
 
 import torch
+
+from fairseq.data import data_utils
+collate_tokens_generic = data_utils.collate_tokens
+
+PAD_TO_LENGTH = 100
+PAD_TO_LENGTH = 122
+BATCH_SIZE = 64  # get this from args
+
+def collate_tokens_new(values, pad_idx, eos_idx=None, left_pad=False, move_eos_to_beginning=False):
+    """
+    Copied over from fairseq.data_utils, and modified so that
+    num_columns in the output tensor is not too variable.
+    """
+    # correcting columns
+    global PAD_TO_LENGTH
+    size = max(v.size(0) for v in values)
+    if size > PAD_TO_LENGTH:
+        print('I had to change PAD_TO_LENGTH from {} to {}, this is going to trigger graph recompiles'.format(PAD_TO_LENGTH, size))
+        PAD_TO_LENGTH = size
+    size = PAD_TO_LENGTH
+    # # correcting rows:
+    # if len(values) < BATCH_SIZE:
+    #     delta = BATCH_SIZE - len(values)
+    #     add_rows = [values[0].new(size).fill_(pad_idx)] * delta
+    #     add_rows[0][-1] = eos_idx
+    #     values.extend(add_rows)
+    #     print('I had to append {} dummy rows to complete batch size to {}'.format(delta, len(values)))
+    # done correcting
+    res = values[0].new(len(values), size).fill_(pad_idx)
+ 
+    def copy_tensor(src, dst):
+        assert dst.numel() == src.numel()
+        if move_eos_to_beginning:
+            assert src[-1] == eos_idx
+            dst[0] = eos_idx
+            dst[1:] = src[:-1]
+        else:
+            dst.copy_(src)
+ 
+    for i, v in enumerate(values):
+        copy_tensor(v, res[i][size - len(v):] if left_pad else res[i][:len(v)])
+    print(res.shape)
+    return res
+
+
+data_utils.collate_tokens = collate_tokens_new
 
 from fairseq import checkpoint_utils, distributed_utils, options, progress_bar, tasks, utils
 from fairseq.data import iterators
@@ -16,15 +59,16 @@ import sys
 sys.path.insert(0, '/pytorch')
 sys.path.insert(0, '/pytorch/xla')
 sys.path.insert(0, '/pytorch/xla/torch_xla_py')
+from argparse import Namespace
 
 import torch_xla
 import torch_xla_py.data_parallel as dp
 import torch_xla_py.utils as xu
 import torch_xla_py.xla_model as xm
 
-
-from argparse import Namespace
-
+# to guarantee input size consistency;
+# `max_sentences` and `required_batch_size_multiple` must be the same
+# and max_tokens must be null, risking ooms
 args=Namespace(
     activation_dropout=0.0,
     activation_fn='relu',
@@ -83,11 +127,11 @@ args=Namespace(
     lr=[0.0005],
     lr_scheduler='inverse_sqrt',
     max_epoch=0,
-    max_sentences=None,
+    max_sentences=64,
     max_sentences_valid=None,
     max_source_positions=1024,
     max_target_positions=1024,
-    max_tokens=3584,
+    max_tokens=None,
     max_update=100000,
     memory_efficient_fp16=False,
     min_loss_scale=0.0001,
@@ -100,7 +144,7 @@ args=Namespace(
     optimizer='adam',
     optimizer_overrides='{}',
     raw_text=False,
-    required_batch_size_multiple=8,
+    required_batch_size_multiple=64,
     reset_lr_scheduler=False,
     reset_optimizer=False,
     restore_file='checkpoint_last.pt',
@@ -136,16 +180,7 @@ for valid_sub_split in args.valid_subset.split(','):
 devices = xm.get_xla_supported_devices(max_devices=1)
 model_parallel = dp.DataParallel(lambda: task.build_model(args), device_ids=devices)
 
-#max_positions = utils.resolve_max_positions(
-#                task.max_positions(),
-#                        model.max_positions(),
-#
-#        )
-max_positions= (1024,1024) # Hardcoded for the moment since the computation requires
-                           # model object which will be created by model_parallel __call__
-                           # Re-factor in a cleaner way
-
-
+max_positions= (1024,1024) 
 
 # Initialize dataloader
 epoch_itr = task.get_batch_iterator(
@@ -173,6 +208,19 @@ itr = epoch_itr.next_epoch_itr(
 # Create the iterator for training
 train_loader = iterators.GroupedIterator(itr, update_freq)
 
+# ############################
+if 1 and False:
+    dset = task.datasets['train']
+    #import pdb
+    #pdb.set_trace()
+    for samples in train_loader:
+        inputtokens = samples[0]['net_input']['src_tokens']
+        targettokens = samples[0]['target']
+        print(inputtokens.shape)
+        print(targettokens.shape)
+        print('-----------------')
+# ############################
+
 def build_optimizer (args, model):
     params = list(filter(lambda p: p.requires_grad, model.parameters()))
     return optim.build_optimizer(args, params)
@@ -186,8 +234,11 @@ def train_loop_fn (model, loader, device='cpu?', context=None):
     criterion = task.build_criterion(args)
     tracker = xm.RateTracker()
     optimizer = build_optimizer(args, model)
-    print('There are 35 batches in 1 epoch')
     for i, samples in loader:
+        if samples[0]['net_input']['src_tokens'].shape[0] < BATCH_SIZE:
+            # This should only happen at the last batch
+            print('skipping last batch of the epoch')
+            continue
         print("Processing minibatch:%d for device %s" % (i, device.index))
         task.train_step(samples[0], model, criterion, optimizer,False)
         xm.optimizer_step(optimizer)
