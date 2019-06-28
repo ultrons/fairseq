@@ -22,13 +22,6 @@ def collate_tokens_new(values, pad_idx, eos_idx=None, left_pad=False, move_eos_t
         print('I had to change PAD_TO_LENGTH from {} to {}, this is going to trigger graph recompiles'.format(PAD_TO_LENGTH, size))
         PAD_TO_LENGTH = size
     size = PAD_TO_LENGTH
-    # # correcting rows:
-    # if len(values) < BATCH_SIZE:
-    #     delta = BATCH_SIZE - len(values)
-    #     add_rows = [values[0].new(size).fill_(pad_idx)] * delta
-    #     add_rows[0][-1] = eos_idx
-    #     values.extend(add_rows)
-    #     print('I had to append {} dummy rows to complete batch size to {}'.format(delta, len(values)))
     # done correcting
     res = values[0].new(len(values), size).fill_(pad_idx)
  
@@ -43,7 +36,6 @@ def collate_tokens_new(values, pad_idx, eos_idx=None, left_pad=False, move_eos_t
  
     for i, v in enumerate(values):
         copy_tensor(v, res[i][size - len(v):] if left_pad else res[i][:len(v)])
-    print(res.shape)
     return res
 
 
@@ -177,8 +169,8 @@ for valid_sub_split in args.valid_subset.split(','):
     task.load_dataset(valid_sub_split, combine=True, epoch=0)
 
 
-devices = xm.get_xla_supported_devices(max_devices=1)
-model_parallel = dp.DataParallel(lambda: task.build_model(args), device_ids=devices)
+devices = xm.get_xla_supported_devices(max_devices=8)
+model_parallel = dp.DataParallel(lambda: task.build_model(args), device_ids=devices, drop_last=True)
 
 max_positions= (1024,1024) 
 
@@ -209,10 +201,15 @@ itr = epoch_itr.next_epoch_itr(
 train_loader = iterators.GroupedIterator(itr, update_freq)
 
 # ############################
-if 1 and False:
-    dset = task.datasets['train']
-    #import pdb
-    #pdb.set_trace()
+if 0:
+    def is_float(t):
+        if r.is_floating_point():
+            print('floatingggg')
+        return t
+    model = task.build_model(args)
+    model = model_parallel._models[0]
+    criterion = task.build_criterion(args)
+    tr = Trainer(args, task, model, criterion)
     for samples in train_loader:
         inputtokens = samples[0]['net_input']['src_tokens']
         targettokens = samples[0]['target']
@@ -226,15 +223,15 @@ def build_optimizer (args, model):
     return optim.build_optimizer(args, params)
 
 
-# task and args objects are referred to from global scope
-# Not sure if it's ok if the function is replicated on multi thread
-# Should be in the Closure
-# from multi-GPU example it seems that it should not be a problem
-def train_loop_fn (model, loader, device='cpu?', context=None):
+def train_loop_fn (model, loader, device, context=None):
     criterion = task.build_criterion(args)
     tracker = xm.RateTracker()
     optimizer = build_optimizer(args, model)
     for i, samples in loader:
+        import pdb
+        pdb.set_trace()
+        print(samples[0]['net_input']['src_tokens'].shape[0])
+        continue
         if samples[0]['net_input']['src_tokens'].shape[0] < BATCH_SIZE:
             # This should only happen at the last batch
             print('skipping last batch of the epoch')
@@ -245,8 +242,6 @@ def train_loop_fn (model, loader, device='cpu?', context=None):
         # print("Rate: {}".format(tracker.rate()))
         print(torch_xla._XLAC._xla_metrics_report())
 
-# Print some samples from train_loader
-#print(next(train_loader))
 
 # Run training from one epoch
 model_parallel(train_loop_fn, train_loader)
