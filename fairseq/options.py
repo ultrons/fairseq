@@ -114,6 +114,8 @@ def parse_args_and_arch(parser, input_args=None, parse_known=False):
     # Post-process args.
     if hasattr(args, 'max_sentences_valid') and args.max_sentences_valid is None:
         args.max_sentences_valid = args.max_sentences
+    if hasattr(args, 'max_tokens_valid') and args.max_tokens_valid is None:
+        args.max_tokens_valid = args.max_tokens
     if getattr(args, 'memory_efficient_fp16', False):
         args.fp16 = True
 
@@ -252,6 +254,9 @@ def add_dataset_args(parser, train=False, gen=False):
                            help='validate every N epochs')
         group.add_argument('--disable-validation', action='store_true',
                            help='disable validation')
+        group.add_argument('--max-tokens-valid', type=int, metavar='N',
+                           help='maximum number of tokens in a validation batch'
+                                ' (defaults to --max-tokens)')
         group.add_argument('--max-sentences-valid', type=int, metavar='N',
                            help='maximum number of sentences in a validation batch'
                                 ' (defaults to --max-sentences)')
@@ -359,6 +364,14 @@ def add_checkpoint_args(parser):
                        help='don\'t save models or checkpoints')
     group.add_argument('--no-epoch-checkpoints', action='store_true',
                        help='only store last and best checkpoints')
+    group.add_argument('--no-last-checkpoints', action='store_true',
+                       help='don\'t store last checkpoints')
+    group.add_argument('--no-save-optimizer-state', action='store_true',
+                       help='don\'t save optimizer-state as part of checkpoint')
+    group.add_argument('--best-checkpoint-metric', type=str, default='loss',
+                       help='metric to use for saving "best" checkpoints')
+    group.add_argument('--maximize-best-checkpoint-metric', action='store_true',
+                       help='select the largest metric value for saving "best" checkpoints')
     # fmt: on
     return group
 
