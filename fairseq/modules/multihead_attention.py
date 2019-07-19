@@ -70,8 +70,8 @@ class MultiheadAttention(nn.Module):
         self.enable_torch_version = False
         # if hasattr(F, "multi_head_attention_forward"):
         #     self.enable_torch_version = True
-        else:
-            self.enable_torch_version = False
+        # else:
+        #     self.enable_torch_version = False
 
     def prepare_for_onnx_export_(self):
         self.onnx_trace = True
