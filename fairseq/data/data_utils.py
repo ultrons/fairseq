@@ -187,8 +187,8 @@ def batch_by_size(
 
         batch.append(idx)
 
-    if len(batch) > 0:
-        yield batch
+    # if len(batch) > 0:
+    #     yield batch
 
 
 def process_bpe_symbol(sentence: str, bpe_symbol: str):
