@@ -33,7 +33,7 @@ class Trainer(object):
     communication of the gradients across workers.
     """
 
-    def __init__(self, args, task, model, criterion, dummy_batch=None, oom_batch=None):
+    def __init__(self, args, task, model, criterion, dummy_batch=None, oom_batch=None, xla=False):
         self.args = args
         self.task = task
 
@@ -58,6 +58,7 @@ class Trainer(object):
         self._wrapped_model = None
 
         self.init_meters(args)
+        self.xla = xla
 
     def init_meters(self, args):
         self.meters = OrderedDict()
@@ -344,7 +345,12 @@ class Trainer(object):
             self._prev_grad_norm = grad_norm
 
             # take an optimization step
-            self.optimizer.step()
+
+            # xla takes care of optimization step using
+            #   torch_xla.xla_model.optimizer_step
+            # so skip optimization step here in that case
+            if not self.xla:
+                self.optimizer.step()
             self.set_num_updates(self.get_num_updates() + 1)
 
             # task specific update per step
