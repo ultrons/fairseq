@@ -344,7 +344,7 @@ class Trainer(object):
             self._prev_grad_norm = grad_norm
 
             # take an optimization step
-            self.optimizer.step()
+            # self.optimizer.step()  # XLA: this is done by torch_xla
             self.set_num_updates(self.get_num_updates() + 1)
 
             # task specific update per step
