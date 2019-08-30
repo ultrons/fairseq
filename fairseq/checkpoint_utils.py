@@ -91,17 +91,21 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss):
                 os.remove(old_chk)
 
 
+def get_checkpoint_path(args):
+    if os.path.isabs(args.restore_file):
+        checkpoint_path = args.restore_file
+    else:
+        checkpoint_path = os.path.join(args.save_dir, args.restore_file)
+    return checkpoint_path
+
+
 def load_checkpoint(args, trainer):
     """Load a checkpoint and restore the training iterator."""
     # only one worker should attempt to create the required dir
     if args.distributed_rank == 0:
         os.makedirs(args.save_dir, exist_ok=True)
 
-    if os.path.isabs(args.restore_file):
-        checkpoint_path = args.restore_file
-    else:
-        checkpoint_path = os.path.join(args.save_dir, args.restore_file)
-
+    checkpoint_path = get_checkpoint_path(args)
     extra_state = trainer.load_checkpoint(
         checkpoint_path,
         args.reset_optimizer,
