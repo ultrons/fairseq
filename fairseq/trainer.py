@@ -365,8 +365,7 @@ class Trainer(object):
             self.meters['bsz'].update(nsentences)
             self.meters['gnorm'].update(grad_norm)
             self.meters['clip'].update(
-                0.,
-                #1. if grad_norm > self.args.clip_norm and self.args.clip_norm > 0 else 0.
+                1. if grad_norm > self.args.clip_norm and self.args.clip_norm > 0 else 0.
             )
             self.meters['train_loss'].update(logging_output.get('loss', 0), sample_size)
             if 'train_acc' in self.meters:
