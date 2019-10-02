@@ -135,6 +135,19 @@ def load_checkpoint(args, trainer):
     return extra_state, epoch_itr
 
 
+def load_checkpoint_tpu(args, trainers, device_preloaded):
+    for device, trainer in trainers.items():
+        if device != device_preloaded:
+            _ = trainer.load_checkpoint(
+                get_checkpoint_path(args),
+                reset_optimizer=args.reset_optimizer,
+                reset_lr_scheduler=args.reset_lr_scheduler,
+                optimizer_overrides=eval(args.optimizer_overrides),
+                reset_meters=args.reset_meters,
+            )
+        trainer.meters_to_device(device)
+
+
 def load_checkpoint_to_cpu(path, arg_overrides=None):
     """Loads a checkpoint to CPU (with upgrading for backward compatibility)."""
     state = torch.load(
