@@ -494,6 +494,14 @@ class Trainer(object):
             return None
         return self.meters[name]
 
+    def meters_to_device(self, device):
+        """Send meters' values to given device. Useful for TPU's."""
+        for meter in self.meters.values():
+            for key, val in vars(meter).items():
+                if isinstance(val, torch.Tensor):
+                    newval = val.to(device=torch.device(device))
+                    setattr(meter, key, newval)
+
     def get_num_updates(self):
         """Get the number of parameters updates."""
         return self._num_updates
