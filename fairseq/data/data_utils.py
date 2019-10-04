@@ -43,7 +43,6 @@ def collate_tokens(
 ):
     """Convert a list of 1d tensors into a padded 2d tensor."""
     size = get_pad_size(values, input_shapes)
-    max(v.size(0) for v in values)
     res = values[0].new(len(values), size).fill_(pad_idx)
 
     def copy_tensor(src, dst):

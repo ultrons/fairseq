@@ -487,10 +487,42 @@ def main_tpu(args):
     print('| done training in {:.1f} seconds'.format(train_meter.sum))
 
 
+def cli_main_gpu(args):
+    if args.distributed_init_method is None:
+        distributed_utils.infer_init_method(args)
 
-def cli_main():
+    if args.distributed_init_method is not None:
+        # distributed training
+        if torch.cuda.device_count() > 1 and not args.distributed_no_spawn:
+            start_rank = args.distributed_rank
+            args.distributed_rank = None  # assign automatically
+            torch.multiprocessing.spawn(
+                fn=distributed_main,
+                args=(args, start_rank),
+                nprocs=torch.cuda.device_count(),
+            )
+        else:
+            distributed_main(args.device_id, args)
+    elif args.distributed_world_size > 1:
+        # fallback for single node with multiple GPUs
+        assert args.distributed_world_size <= torch.cuda.device_count()
+        port = random.randint(10000, 20000)
+        args.distributed_init_method = 'tcp://localhost:{port}'.format(port=port)
+        args.distributed_rank = None  # set based on device id
+        if max(args.update_freq) > 1 and args.ddp_backend != 'no_c10d':
+            print('| NOTE: you may get better performance with: --ddp-backend=no_c10d')
+        torch.multiprocessing.spawn(
+            fn=distributed_main,
+            args=(args, ),
+            nprocs=args.distributed_world_size,
+        )
+    else:
+        # single GPU training
+        main(args)
+
+
+def get_args():
     parser = options.get_training_parser()
-
     # TPU: need to control certain flags here.
     # e.g. parallelization needs to be suppressed and deferred to torch_xla flags
     # e.g. input tensor shapes need to be controlled via --input_shapes
@@ -512,43 +544,10 @@ def cli_main():
     parser.add_argument('--metrics_debug', action='store_true')
     parser.add_argument('--use_gpu', action='store_true')
     args = options.parse_args_and_arch(parser)
+    return args
 
-    if args.use_gpu:
-        if args.distributed_init_method is None:
-            distributed_utils.infer_init_method(args)
 
-        if args.distributed_init_method is not None:
-            # distributed training
-            if torch.cuda.device_count() > 1 and not args.distributed_no_spawn:
-                start_rank = args.distributed_rank
-                args.distributed_rank = None  # assign automatically
-                torch.multiprocessing.spawn(
-                    fn=distributed_main,
-                    args=(args, start_rank),
-                    nprocs=torch.cuda.device_count(),
-                )
-            else:
-                distributed_main(args.device_id, args)
-        elif args.distributed_world_size > 1:
-            # fallback for single node with multiple GPUs
-            assert args.distributed_world_size <= torch.cuda.device_count()
-            port = random.randint(10000, 20000)
-            args.distributed_init_method = 'tcp://localhost:{port}'.format(port=port)
-            args.distributed_rank = None  # set based on device id
-            if max(args.update_freq) > 1 and args.ddp_backend != 'no_c10d':
-                print('| NOTE: you may get better performance with: --ddp-backend=no_c10d')
-            torch.multiprocessing.spawn(
-                fn=distributed_main,
-                args=(args, ),
-                nprocs=args.distributed_world_size,
-            )
-        else:
-            # single GPU training
-            main(args)
-        return
-
-    # From here on out we are in TPU context
-
+def adjust_args_tpu(args):
     if args.fp16:
         raise RuntimeError(
             '--fp16 was provided, this is controlled by env var XLA_USE_BF16')
@@ -580,14 +579,24 @@ def cli_main():
     args.input_shapes = parse_input_shapes(args.input_shapes)
     # XXX (taylanbil): do we ever have more than 2 dimensions in fairseq?
     args.max_source_positions = args.input_shapes[-1][1]
-    if xu.getenv_as('XLA_USE_BF16', bool, False):
-        xu.eprint(
-            'WARNING: bfloat16 is enabled. Note that fairseq meters such as '
-            'loss will accumulate the numerator, and increment the denominator. '
-            'Due to lack of precision in higher numbers in bfloat16, these '
-            'meters will report invalid values after a while.')
+    return args
 
-    main_tpu(args)
+
+def cli_main():
+    args = get_args()
+    if args.use_gpu:
+        cli_main_gpu(args)
+    else:
+        args = adjust_args_tpu(args)
+        # From here on out we are in TPU context
+        if xu.getenv_as('XLA_USE_BF16', bool, False):
+            xu.eprint(
+                'WARNING: bfloat16 is enabled. Note that fairseq meters such as '
+                'loss will accumulate the numerator, and increment the denominator. '
+                'Due to lack of precision in higher numbers in bfloat16, these '
+                'meters will report invalid values after a while.')
+
+        main_tpu(args)
 
 
 if __name__ == '__main__':
