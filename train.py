@@ -357,8 +357,8 @@ def main_tpu(args):
                 print(
                     log_step(
                         'training', device, i,
-                        log_output=log_output, tracker=tracker
-                    )
+                        log_output=log_output, tracker=tracker),
+                    flush=True,
                 )
             log_output = trainer.train_step(samples)
             xm.optimizer_step(trainer.optimizer)
