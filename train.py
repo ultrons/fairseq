@@ -492,8 +492,8 @@ def assert_on_losses(args, trainers):
     if xu.getenv_as('XLA_USE_BF16', bool, False):
         # XXX: loss values are meaningless in this case due to precision in bf16
         return
-    valid_loss = args.target_valid_loss or -math.inf
-    train_loss = args.target_train_loss or -math.inf
+    valid_loss = args.target_valid_loss or math.inf
+    train_loss = args.target_train_loss or math.inf
     for device, trainer in trainers.items():
         assert valid_loss > trainer.meters['valid_loss'].avg.item()
         assert train_loss > trainer.meters['train_loss'].avg.item()
