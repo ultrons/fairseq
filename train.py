@@ -485,6 +485,18 @@ def main_tpu(args):
 
     train_meter.stop()
     print('| done training in {:.1f} seconds'.format(train_meter.sum))
+    assert_on_losses(args, trainers)
+
+
+def assert_on_losses(args, trainers):
+    if xu.getenv_as('XLA_USE_BF16', bool, False):
+        # XXX: loss values are meaningless in this case due to precision in bf16
+        return
+    valid_loss = args.target_valid_loss or -math.inf
+    train_loss = args.target_train_loss or -math.inf
+    for device, trainer in trainers.items():
+        assert valid_loss > trainer.meters['valid_loss'].avg.item()
+        assert train_loss > trainer.meters['train_loss'].avg.item()
 
 
 def cli_main_gpu(args):
@@ -543,6 +555,8 @@ def get_args():
     parser.add_argument('--num_cores', type=int, default=8)
     parser.add_argument('--metrics_debug', action='store_true')
     parser.add_argument('--use_gpu', action='store_true')
+    parser.add_argument('--target_train_loss', type=float, default=None)
+    parser.add_argument('--target_valid_loss', type=float, default=None)
     args = options.parse_args_and_arch(parser)
     return args
 
@@ -594,7 +608,8 @@ def cli_main():
                 'WARNING: bfloat16 is enabled. Note that fairseq meters such as '
                 'loss will accumulate the numerator, and increment the denominator. '
                 'Due to lack of precision in higher numbers in bfloat16, these '
-                'meters will report invalid values after a while.')
+                'meters will report invalid values after a while.'
+            )
 
         main_tpu(args)
 
