@@ -11,15 +11,19 @@ Train a new model on one or across multiple GPUs.
 
 import collections
 import math
+import sys
 import os
 import random
 from datetime import datetime
 
 import torch
 import torch_xla
+import torch_xla.debug.metrics as met
 import torch_xla.distributed.data_parallel as dp
+import torch_xla.distributed.parallel_loader as pl
 import torch_xla.utils.utils as xu
 import torch_xla.core.xla_model as xm
+import torch_xla.distributed.xla_multiprocessing as xmp
 
 from fairseq import checkpoint_utils, distributed_utils, options, progress_bar, tasks, utils
 from fairseq.data import iterators
@@ -27,7 +31,7 @@ from fairseq.trainer import Trainer
 from fairseq.meters import AverageMeter, StopwatchMeter
 
 
-def initialize_loader_for_epoch(args, epoch_itr):
+def initialize_loader_for_epoch(args, epoch_itr, prefix='training'):
     # Update parameters every N batches
     if epoch_itr.epoch <= len(args.update_freq):
         update_freq = args.update_freq[epoch_itr.epoch - 1]
@@ -39,7 +43,7 @@ def initialize_loader_for_epoch(args, epoch_itr):
           fix_batches_to_gpus=False, shuffle=(epoch_itr.epoch >= args.curriculum))
     itr = iterators.GroupedIterator(itr, update_freq)
     progress = progress_bar.build_progress_bar(
-          args, itr, epoch_itr.epoch, prefix='training', no_progress_bar='simple')
+          args, itr, epoch_itr.epoch, prefix=prefix, no_progress_bar='simple')
     return progress
 
 
@@ -312,7 +316,7 @@ def main_tpu(args):
             )
         return msg
 
-    def prepare_task(args, devices):
+    def prepare_task(args, xla_device):
         # Setup task, e.g., translation, language modeling, etc.
         task = tasks.setup_task(args)
 
@@ -321,38 +325,40 @@ def main_tpu(args):
             task.load_dataset(valid_sub_split, combine=True, epoch=0)
 
         # Build models and criteria to print some metadata
-        model_parallel = dp.DataParallel(
-            lambda: task.build_model(args), device_ids=devices)
+        torch.manual_seed(args.seed)
         model, criterion = task.build_model(args), task.build_criterion(args)
-        print_model_criterion(model, criterion, args)
-        del model, criterion
-
-        # Build trainers
-        trainers = {
-            device: Trainer(args, task, model, task.build_criterion(args), xla=True)
-            for device, model in zip(model_parallel.devices, model_parallel.models)
-        }
-        lr = trainers[devices[0]].get_lr()
+        xm.master_print(model)
+        xm.master_print('| model {}, criterion {}'.format(
+            args.arch, criterion.__class__.__name__))
+        xm.master_print('| num. model params: {} (num. trained: {})'.format(
+            sum(p.numel() for p in model.parameters()),
+            sum(p.numel() for p in model.parameters() if p.requires_grad)))
+        model = model.to(xla_device)
+        trainer = Trainer(args, task, model, criterion, xla=True)
+        lr = trainer.get_lr()
 
         # Load the latest checkpoint if one is available and restore the
         # corresponding train iterator
-        extra_state, epoch_itr = checkpoint_utils.load_checkpoint(
-            args, trainers[devices[0]])
-        if extra_state is not None:
-            # checkpoint detected, load saved model weights to all devices
-            xu.eprint(
-                'checkpoint detected, device 0 meters need to be '
-                're-loaded to device'
-            )
-            checkpoint_utils.load_checkpoint_tpu(args, trainers, devices[0])
+        # set distributed args here to shard data
+        trainer.args.distributed_rank = xm.get_ordinal()
+        trainer.args.distributed_world_size = xm.xrt_world_size()
+        extra_state, epoch_itr = checkpoint_utils.load_checkpoint(args, trainer)
+        trainer.args.distributed_rank = 0
+        trainer.args.distributed_world_size = 1
         valid_subsets = args.valid_subset.split(',')
-        return task, trainers, model_parallel, epoch_itr, lr, valid_subsets
+        ordinal = xm.get_ordinal(defval=-1)
+        device_str = (
+            str(xla_device) if ordinal < 0 else
+            '{}/{}'.format(xla_device, ordinal)
+        )
+        return task, trainer, model, epoch_itr, lr, valid_subsets, device_str
 
-    def train_loop_fn(model, loader, device, context):
-        trainer = trainers[str(device)]
-        stats, log_output = None, None
-        tracker = xm.RateTracker()
+    def train_loop_fn(device, trainer, loader, last_batch_index):
+        stats, log_output, tracker = None, None, xm.RateTracker()
         for i, samples in enumerate(loader):
+            if i == last_batch_index:
+                # last batches are incomplete
+                break
             if i and not (i % args.log_steps):
                 print(
                     log_step(
@@ -365,8 +371,7 @@ def main_tpu(args):
             tracker.add(sum(sample['nsentences'] for sample in samples))
         return tracker
 
-    def valid_loop_fn(model, loader, device, context):
-        trainer = trainers[str(device)]
+    def valid_loop_fn(device, trainer, loader, last_batch_index):
         # reset validation loss meters
         for k in ['valid_loss', 'valid_nll_loss']:
             meter = trainer.get_meter(k)
@@ -374,6 +379,9 @@ def main_tpu(args):
                 meter.reset()
         extra_meters = collections.defaultdict(lambda: AverageMeter())
         for i, sample in enumerate(loader):
+            if i == last_batch_index:
+                # last batches are of different size, will cause recompilations
+                break
             if not (i % args.log_steps):
                 print(log_step('validation', device, i, tracker=None))
             log_output = trainer.valid_step(sample)
@@ -386,16 +394,17 @@ def main_tpu(args):
             stats[k] = meter.avg
         return stats
 
-    def validate_subset(args, trainers, task, epoch_itr, subset):
-        print('Validating the subset "{}"'.format(subset))
+    def validate_subset(args, device, trainer, task, epoch_itr, subset):
+        xm.master_print('Validating the subset "{}"'.format(subset))
         # Initialize data iterator
+        # XXX: we're not sharding the validation set
         itr = task.get_batch_iterator(
             dataset=task.dataset(subset),
             max_tokens=args.max_tokens,
             max_sentences=args.max_sentences_valid,
             max_positions=utils.resolve_max_positions(
                 task.max_positions(),
-                list(trainers.values())[0].get_model().max_positions(),
+                list(trainer.get_model().max_positions()),
             ),
             ignore_invalid_inputs=args.skip_invalid_size_inputs_valid_test,
             required_batch_size_multiple=args.required_batch_size_multiple,
@@ -404,87 +413,99 @@ def main_tpu(args):
         ).next_epoch_itr(shuffle=False)
         progress = progress_bar.build_progress_bar(
             args, itr, epoch_itr.epoch,
-            prefix='valid on \'{}\' subset'.format(subset),
+            prefix='valid on {} \'{}\' subset'.format(device, subset),
             no_progress_bar='simple'
         )
-        stats_per_device = model_parallel(valid_loop_fn, progress)
-        valid_losses = [stats['loss'].avg for stats in stats_per_device]
-        print('validation stats on subset "{}" - {}'.format(subset, now()))
-        for stats in stats_per_device:
-            progress.print(
-                stats, tag=subset, step=trainers['xla:1'].get_num_updates()
-            )
-        return valid_losses
+        para_loader = pl.ParallelLoader(progress, [device])
+        stats = valid_loop_fn(
+            device, trainer, para_loader.per_device_loader(device),
+            len(progress) - 1
+        )
+        progress.print(stats, tag=subset, step=trainer.get_num_updates())
+        return stats['loss'].avg
 
-    def validate_subsets(args, trainers, task, epoch_itr, subsets):
+    def validate_subsets(args, device, trainer, task, epoch_itr, subsets):
         valid_losses = {
-            subset: validate_subset(args, trainers, task, epoch_itr, subset)
+            subset: validate_subset(
+                args, device, trainer, task, epoch_itr, subset
+            )
             for subset in subsets
         }
         return valid_losses
 
-    def keep_training(lr, epoch_itr, trainers):
+    def keep_training(lr, epoch_itr, trainer):
         # Train until the learning rate gets too small
         max_epoch = args.max_epoch or math.inf
         max_update = args.max_update or math.inf
-        lr = min(trainer.get_lr() for trainer in trainers.values())
-        n_updates = max(trainer.get_num_updates() for trainer in trainers.values())
+        lr, n_updates = trainer.get_lr(), trainer.get_num_updates()
         return ((lr > args.min_lr) and (epoch_itr.epoch < max_epoch) and
             (n_updates < max_update))
 
-    xu.eprint('Args')
-    for key, val in args.__dict__.items():
-        xu.eprint('\t{} {}'.format(key, val))
+    if xu.getenv_as('XLA_USE_BF16', bool, False):
+        xm.master_print(
+            'WARNING: bfloat16 is enabled. Note that fairseq meters such as '
+            'loss will accumulate the numerator, and increment the denominator.'
+            ' Due to lack of precision in higher numbers in bfloat16, these '
+            'meters will report invalid values after a while.',
+            fd=sys.stderr
+        )
 
-    devices = xm.get_xla_supported_devices(max_devices=args.num_cores)
-    task, trainers, model_parallel, epoch_itr, lr, valid_subsets = prepare_task(
-        args, devices)
+    xm.master_print('Args', fd=sys.stderr)
+    for key, val in args.__dict__.items():
+        xm.master_print('\t{} {}'.format(key, val), fd=sys.stderr)
+    # `xla_device` is `torch.device` and `device` is `str`
+    xla_device = xm.xla_device()
+    task, trainer, model, epoch_itr, lr, valid_subsets, device = prepare_task(
+        args, xla_device)
 
     train_meter = StopwatchMeter()
     train_meter.start()
-    while keep_training(lr, epoch_itr, trainers):
+    while keep_training(lr, epoch_itr, trainer):
         # TRAINING
-        print('Epoch {} begin {}'.format(epoch_itr.epoch + 1, now()))
-        progress = initialize_loader_for_epoch(args, epoch_itr)
-        trackers = model_parallel(train_loop_fn, progress)
-        print('Epoch {} Training stats:'.format(epoch_itr.epoch))
-        for device, trainer in trainers.items():
-            stats = get_training_stats(trainer)
-            print('device {}'.format(device))
-            progress.print(stats, tag=device)
-        print('Epoch {} Tracker Rates:'.format(epoch_itr.epoch))
-        for tracker in trackers:
-            rates = tracker.rate(), tracker.global_rate()
-            print('\tRate={:.2f}, GlobalRate={:.2f}'.format(*rates))
-        print('Epoch {} end {}'.format(epoch_itr.epoch, now()))
+        xm.master_print('Epoch {} begin {}'.format(epoch_itr.epoch + 1, now()))
+        progress = initialize_loader_for_epoch(
+            args, epoch_itr, prefix='training on {}'.format(device),
+        )
+        para_loader = pl.ParallelLoader(progress, [device])
+        tracker = train_loop_fn(
+            device, trainer, para_loader.per_device_loader(device),
+            len(progress) - 1
+        )
+        stats = get_training_stats(trainer)
+        progress.print(stats, tag=device)
+        print(
+            'Device {} Epoch {} Tracker Rate={:.2f}, GlobalRate={:.2f}'.format(
+                device, epoch_itr.epoch, tracker.rate(), tracker.global_rate()
+            )
+        )
+        xm.master_print('Epoch {} end {}'.format(epoch_itr.epoch, now()))
         if args.metrics_debug:
-            print(torch_xla._XLAC._xla_metrics_report())
+            xm.master_print(met.metrics_report())
 
         # VALIDATION
         if not args.disable_validation and epoch_itr.epoch % args.validate_interval == 0:
             valid_losses = validate_subsets(
-                args, trainers, task, epoch_itr, valid_subsets
+                args, device, trainer, task, epoch_itr, valid_subsets
             )
 
             # only use average first validation loss from the first device
             # to update the learning rate
-            vloss = valid_losses[valid_subsets[0]][0].item()
-            print('old learning rate: {}'.format(lr))
-            lr = trainers[devices[0]].lr_step(epoch_itr.epoch, vloss)
-            print('new learning rate: {}'.format(lr))
+            vloss = valid_losses[valid_subsets[0]].item()
+            xm.master_print('old learning rate: {}'.format(lr))
+            lr = trainer.lr_step(epoch_itr.epoch, vloss)
+            xm.master_print('new learning rate: {}'.format(lr))
         else:
             vloss = None
 
         # save checkpoint
         if epoch_itr.epoch % args.save_interval == 0:
-            checkpoint_utils.save_checkpoint(
-                args, trainers[devices[0]], epoch_itr, vloss)
+            checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, vloss)
 
         if args.metrics_debug:
-            print(torch_xla._XLAC._xla_metrics_report())
+            xm.master_print(met.metrics_report())
 
     train_meter.stop()
-    print('| done training in {:.1f} seconds'.format(train_meter.sum))
+    xm.master_print('| done training in {:.1f} seconds'.format(train_meter.sum))
     assert_on_losses(args, trainers)
 
 
@@ -565,12 +586,10 @@ def adjust_args_tpu(args):
     if args.fp16:
         raise RuntimeError(
             '--fp16 was provided, this is controlled by env var XLA_USE_BF16')
-    if args.distributed_world_size > 1:
-        xu.eprint('suppressing "distributed_world_size"')
-        args.distributed_world_size = 1
-    if args.distributed_init_method is not None:
-        xu.eprint('suppressing "distributed_init_method"')
-        args.distributed_init_method = None
+    print('suppressing distributed_init args for GPU', file=sys.stderr)
+    args.distributed_rank = 0
+    args.distributed_world_size = 1
+    args.distributed_init_method = None
     if args.input_shapes is None:
         raise RuntimeError(
             'Please specify batches and pad lengths using '
@@ -599,19 +618,15 @@ def adjust_args_tpu(args):
 def cli_main():
     args = get_args()
     if args.use_gpu:
-        cli_main_gpu(args)
-    else:
-        args = adjust_args_tpu(args)
-        # From here on out we are in TPU context
-        if xu.getenv_as('XLA_USE_BF16', bool, False):
-            xu.eprint(
-                'WARNING: bfloat16 is enabled. Note that fairseq meters such as '
-                'loss will accumulate the numerator, and increment the denominator. '
-                'Due to lack of precision in higher numbers in bfloat16, these '
-                'meters will report invalid values after a while.'
-            )
+        return cli_main_gpu(args)
+    # From here on out we are in TPU context
+    args = adjust_args_tpu(args)
+    xmp.spawn(_mp_fn, args=(args,), nprocs=args.num_cores)
 
-        main_tpu(args)
+
+def _mp_fn(index, args):
+    torch.set_default_tensor_type('torch.FloatTensor')
+    main_tpu(args)
 
 
 if __name__ == '__main__':

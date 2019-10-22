@@ -20,6 +20,8 @@ from torch.serialization import default_restore_location
 
 from fairseq.models import FairseqEncoder, FairseqDecoder
 
+import torch_xla.core.xla_model as xm
+
 
 def save_checkpoint(args, trainer, epoch_itr, val_loss):
     from fairseq import distributed_utils, meters
@@ -63,11 +65,12 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss):
         extra_state.update({'best': save_checkpoint.best})
 
     checkpoints = [os.path.join(args.save_dir, fn) for fn, cond in checkpoint_conds.items() if cond]
+
     if len(checkpoints) > 0:
         trainer.save_checkpoint(checkpoints[0], extra_state)
         for cp in checkpoints[1:]:
-            shutil.copyfile(checkpoints[0], cp)
-
+            if xm.is_master_ordinal():
+                shutil.copyfile(checkpoints[0], cp)
         write_timer.stop()
         print('| saved checkpoint {} (epoch {} @ {} updates) (writing took {} seconds)'.format(
             checkpoints[0], epoch, updates, write_timer.sum))
@@ -133,19 +136,6 @@ def load_checkpoint(args, trainer):
     trainer.lr_step(epoch_itr.epoch)
 
     return extra_state, epoch_itr
-
-
-def load_checkpoint_tpu(args, trainers, device_preloaded):
-    for device, trainer in trainers.items():
-        if device != device_preloaded:
-            _ = trainer.load_checkpoint(
-                get_checkpoint_path(args),
-                reset_optimizer=args.reset_optimizer,
-                reset_lr_scheduler=args.reset_lr_scheduler,
-                optimizer_overrides=eval(args.optimizer_overrides),
-                reset_meters=args.reset_meters,
-            )
-        trainer.meters_to_device(device)
 
 
 def load_checkpoint_to_cpu(path, arg_overrides=None):
@@ -216,7 +206,8 @@ def checkpoint_paths(path, pattern=r'checkpoint(\d+)\.pt'):
 def torch_persistent_save(*args, **kwargs):
     for i in range(3):
         try:
-            return torch.save(*args, **kwargs)
+            save_func = xm.save if kwargs.pop('xla', False) else torch.save
+            return save_func(*args, **kwargs)
         except Exception:
             if i == 2:
                 logging.error(traceback.format_exc())
@@ -259,7 +250,9 @@ def save_state(
     }
     if not args.no_save_optimizer_state:
         state_dict['last_optimizer_state'] = convert_state_dict_type(optimizer.state_dict())
-    torch_persistent_save(state_dict, filename)
+    torch_persistent_save(
+        state_dict, filename, xla=not getattr(args, 'use_gpu', True)
+    )
 
 
 def _upgrade_state_dict(state):
