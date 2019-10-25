@@ -506,7 +506,7 @@ def main_tpu(args):
 
     train_meter.stop()
     xm.master_print('| done training in {:.1f} seconds'.format(train_meter.sum))
-    assert_on_losses(args, trainers)
+    assert_on_losses(args, trainer)
 
 
 def assert_on_losses(args, trainers):
@@ -515,9 +515,8 @@ def assert_on_losses(args, trainers):
         return
     valid_loss = args.target_valid_loss or math.inf
     train_loss = args.target_train_loss or math.inf
-    for device, trainer in trainers.items():
-        assert valid_loss > trainer.meters['valid_loss'].avg.item()
-        assert train_loss > trainer.meters['train_loss'].avg.item()
+    assert valid_loss > trainer.meters['valid_loss'].avg.item()
+    assert train_loss > trainer.meters['train_loss'].avg.item()
 
 
 def cli_main_gpu(args):
