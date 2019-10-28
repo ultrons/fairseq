@@ -509,7 +509,7 @@ def main_tpu(args):
     assert_on_losses(args, trainer)
 
 
-def assert_on_losses(args, trainers):
+def assert_on_losses(args, trainer):
     if xu.getenv_as('XLA_USE_BF16', bool, False):
         # XXX: loss values are meaningless in this case due to precision in bf16
         return
