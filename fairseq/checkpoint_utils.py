@@ -105,7 +105,7 @@ def get_checkpoint_path(args):
 def load_checkpoint(args, trainer):
     """Load a checkpoint and restore the training iterator."""
     # only one worker should attempt to create the required dir
-    if args.distributed_rank == 0:
+    if args.distributed_rank == 0 or xm.is_master_ordinal():
         os.makedirs(args.save_dir, exist_ok=True)
 
     checkpoint_path = get_checkpoint_path(args)
