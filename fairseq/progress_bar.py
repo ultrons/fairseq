@@ -71,6 +71,7 @@ class progress_bar(object):
         self.offset = getattr(iterable, 'offset', 0)
         self.epoch = epoch
         self.prefix = ''
+        self.skip_keys = None
         if epoch is not None:
             self.prefix += '| epoch {:03d}'.format(epoch)
         if prefix is not None:
@@ -111,6 +112,9 @@ class progress_bar(object):
             postfix[key] = str(format_stat(postfix[key]))
         return postfix
 
+    def set_keys_to_skip_mid_epoch(self, keys):
+        self.skip_keys = keys
+
 
 class json_progress_bar(progress_bar):
     """Log output in JSON format."""
@@ -121,18 +125,31 @@ class json_progress_bar(progress_bar):
         self.stats = None
 
     def __iter__(self):
-        size = float(len(self.iterable))
         for i, obj in enumerate(self.iterable, start=self.offset):
             yield obj
             if self.stats is not None and i > 0 and \
                     self.log_interval is not None and i % self.log_interval == 0:
-                update = self.epoch - 1 + float(i / size) if self.epoch is not None else None
-                stats = self._format_stats(self.stats, epoch=self.epoch, update=update)
-                print(json.dumps(stats), flush=True)
+                # tpu-comment: torch_xla's loaders iterate and queue this
+                # so we need to isolate printing from iterating here
+                # we do that by suppressing `self.log_interval` and setting it
+                # to None, and call `self.print_mid_epoch` from the training
+                # script directly
+                self.print_mid_epoch(i)
 
     def log(self, stats, tag='', step=None):
         """Log intermediate stats according to log_interval."""
-        self.stats = stats
+        if self.skip_keys is not None:
+            self.stats = {
+                k: v for (k, v) in stats.items() if k not in self.skip_keys
+            }
+        else:
+            self.stats = stats
+
+    def print_mid_epoch(self, i):
+        size = float(len(self))
+        update = self.epoch - 1 + float(i / size) if self.epoch is not None else None
+        stats = self._format_stats(self.stats, epoch=self.epoch, update=update)
+        print(json.dumps(stats), flush=True)
 
     def print(self, stats, tag='', step=None):
         """Print end-of-epoch stats."""
@@ -182,18 +199,27 @@ class simple_progress_bar(progress_bar):
         self.stats = None
 
     def __iter__(self):
-        size = len(self.iterable)
         for i, obj in enumerate(self.iterable, start=self.offset):
             yield obj
             if self.stats is not None and i > 0 and \
                     self.log_interval is not None and i % self.log_interval == 0:
-                postfix = self._str_commas(self.stats)
-                print('{}:  {:5d} / {:d} {}'.format(self.prefix, i, size, postfix),
-                      flush=True)
+                self.print_mid_epoch(i)
+
 
     def log(self, stats, tag='', step=None):
         """Log intermediate stats according to log_interval."""
+        if self.skip_keys is not None:
+            stats = {
+                k: v for (k, v) in stats.items() if k not in self.skip_keys
+            }
         self.stats = self._format_stats(stats)
+
+    def print_mid_epoch(self, i):
+        postfix = self._str_commas(self.stats)
+        print(
+            '{}:  {:5d} / {:d} {}'.format(self.prefix, i, len(self), postfix),
+            flush=True
+        )
 
     def print(self, stats, tag='', step=None):
         """Print end-of-epoch stats."""

@@ -198,7 +198,7 @@ def train(args, trainer, task, epoch_itr):
             meter.reset()
 
 
-def get_training_stats(trainer):
+def get_training_stats(trainer, args):
     stats = collections.OrderedDict()
     stats['loss'] = trainer.get_meter('train_loss')
     if trainer.get_meter('train_nll_loss').count > 0:
@@ -206,7 +206,10 @@ def get_training_stats(trainer):
         stats['nll_loss'] = nll_loss
     else:
         nll_loss = trainer.get_meter('train_loss')
-    stats['ppl'] = utils.get_perplexity(nll_loss.avg)
+    if getattr(args, 'use_gpu', True):
+        # computing perplexity introduces aten::_local_scalar_dense calls
+        # that slow training down
+        stats['ppl'] = utils.get_perplexity(nll_loss.avg)
     stats['wps'] = trainer.get_meter('wps')
     stats['ups'] = trainer.get_meter('ups')
     stats['wpb'] = trainer.get_meter('wpb')
@@ -214,7 +217,10 @@ def get_training_stats(trainer):
     stats['num_updates'] = trainer.get_num_updates()
     stats['lr'] = trainer.get_lr()
     stats['gnorm'] = trainer.get_meter('gnorm')
-    stats['clip'] = trainer.get_meter('clip')
+    if getattr(args, 'use_gpu', True):
+        # computing 'clip' count introduces aten::_local_scalar_dense calls
+        # that slow training down, so it's disabled, hence the meter is invalid
+        stats['clip'] = trainer.get_meter('clip')
     stats['oom'] = trainer.get_meter('oom')
     if trainer.get_meter('loss_scale') is not None:
         stats['loss_scale'] = trainer.get_meter('loss_scale')
@@ -320,6 +326,7 @@ def distributed_main(i, args, start_rank=0):
         args.distributed_rank = start_rank + i
     main(args, init_distributed=True)
 
+
 def parse_input_shapes(input_shapes_arg):
     input_shapes = (
         shape.replace('*', 'x').split('x') for shape in input_shapes_arg)
@@ -337,23 +344,11 @@ def parse_input_shapes(input_shapes_arg):
     return input_shapes
 
 
+def now():
+    return datetime.now().strftime('%H:%M:%S')
+
+
 def main_tpu(args):
-
-    def now():
-        return datetime.now().strftime('%H:%M:%S')
-
-    def log_step(step_type, device, step, log_output=None, tracker=None):
-        msg = '{}/ {}, device {}, step {}'.format(
-            step_type, now(), device, step
-        )
-        if tracker:
-            rates = tracker.rate(), tracker.global_rate()
-            msg += ', Rate={:.2f}, GlobalRate={:.2f}'.format(*rates)
-        if log_output:
-            msg += ', loss={:.4f}, nll_loss={:.4f}'.format(
-                log_output['loss'].item(), log_output['nll_loss'].item()
-            )
-        return msg
 
     def prepare_task(args, xla_device):
         # Setup task, e.g., translation, language modeling, etc.
@@ -398,26 +393,28 @@ def main_tpu(args):
         """
         This is the main training loop. It trains for 1 epoch.
         """
-        stats, log_output, tracker = None, None, xm.RateTracker()
-        for i, samples in enumerate(loader):
+        stats, log_output, skip_stat_keys = None, None, {'clip'}
+        tracker = xm.RateTracker()
+        for i, samples in enumerate(loader, start=epoch_itr.iterations_in_epoch):
             if i == last_batch_index:
                 # last batches are incomplete
                 break
-            if (i == last_batch_index - 1) or not (i % args.log_steps):
-                print(
-                    log_step(
-                        'training', device, i,
-                        log_output=log_output, tracker=tracker,
-                    ),
-                    flush=True,
-                )
             log_output = trainer.train_step(samples)
-            log_output = None if args.suppress_loss_report else log_output
             xm.optimizer_step(trainer.optimizer)
             tracker.add(sum(sample['nsentences'] for sample in samples))
-        return tracker
+            if (not (i % args.log_steps)) or (i == last_batch_index-1):
+                step_args = trainer, progress, args, i, tracker
+                xm.add_step_closure(print_training_update, args=step_args)
 
-    def valid_loop_fn(args, device, trainer, loader, last_batch_index):
+    def print_training_update(trainer, progress, args, i, tracker):
+        stats = get_training_stats(trainer, args=args)
+        stats['rate'] = tracker.rate()
+        progress.log(stats, step=stats['num_updates'])
+        progress.print_mid_epoch(i+1)
+
+    def valid_loop_fn(
+        args, device, trainer, progress, loader, last_batch_index
+    ):
         # reset validation loss meters
         for k in ['valid_loss', 'valid_nll_loss']:
             meter = trainer.get_meter(k)
@@ -428,8 +425,6 @@ def main_tpu(args):
             if i == last_batch_index:
                 # last batches are of different size, will cause recompilations
                 break
-            if not (i % args.log_steps):
-                print(log_step('validation', device, i, tracker=None))
             log_output = trainer.valid_step(sample)
             for k, v in log_output.items():
                 if k in ['loss', 'nll_loss', 'ntokens', 'nsentences', 'sample_size']:
@@ -441,7 +436,7 @@ def main_tpu(args):
         return stats
 
     def validate_subset(args, device, trainer, task, epoch_itr, subset):
-        xm.master_print('Validating the subset "{}"'.format(subset))
+        xm.master_print('Validating the subset "{}", {}'.format(subset, now()))
         # Initialize data iterator
         # we're not sharding the validation set
         itr = task.get_batch_iterator(
@@ -464,10 +459,11 @@ def main_tpu(args):
         )
         para_loader = pl.ParallelLoader(progress, [device])
         stats = valid_loop_fn(
-            args, device, trainer, para_loader.per_device_loader(device),
-            len(progress) - 1
+            args, device, trainer, progress,
+            para_loader.per_device_loader(device), len(progress) - 1
         )
         progress.print(stats, tag=subset, step=trainer.get_num_updates())
+        xm.master_print('Validated the subset "{}", {}'.format(subset, now()))
         return stats['loss'].avg
 
     def validate_subsets(args, device, trainer, task, epoch_itr, subsets):
@@ -512,18 +508,17 @@ def main_tpu(args):
         progress = initialize_loader_for_epoch(
             args, epoch_itr, prefix='training on {}'.format(device),
         )
+        skip_stat_keys = {'clip'}
+        if args.suppress_loss_report:
+            skip_stat_keys.update({'loss', 'nll_loss', 'gnorm'})
+        progress.set_keys_to_skip_mid_epoch(skip_stat_keys)
         para_loader = pl.ParallelLoader(progress, [device])
         tracker = train_loop_fn(
             device, trainer, para_loader.per_device_loader(device),
             len(progress) - 1
         )
-        stats = get_training_stats(trainer)
+        stats = get_training_stats(trainer, args=args)
         progress.print(stats, tag=device)
-        print(
-            'Device {} Epoch {} Tracker Rate={:.2f}, GlobalRate={:.2f}'.format(
-                device, epoch_itr.epoch, tracker.rate(), tracker.global_rate()
-            )
-        )
         xm.master_print('Epoch {} end {}'.format(epoch_itr.epoch, now()))
         if args.metrics_debug:
             xm.master_print(met.metrics_report())
@@ -600,7 +595,7 @@ def cli_main_gpu(args):
 
 def get_args():
     parser = options.get_training_parser()
-    # TPU: need to control certain flags here.
+    # tpu-comment: need to control certain flags here.
     # e.g. parallelization needs to be suppressed and deferred to torch_xla flags
     # e.g. input tensor shapes need to be controlled via --input_shapes
     parser.add_argument(
@@ -656,6 +651,11 @@ def adjust_args_tpu(args):
 
     args.input_shapes = parse_input_shapes(args.input_shapes)
     args.max_source_positions = args.input_shapes[-1][1]
+    # tpu-comment: --log-interval makes progress_bar print after yielding,
+    #   thus it's incompatible with torch_xla's data loaders
+    if args.log_interval is not None:
+        args.log_steps = args.log_steps or args.log_interval
+        args.log_interval = None
     return args
 
 
