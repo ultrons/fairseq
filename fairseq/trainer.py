@@ -16,6 +16,8 @@ import sys
 
 import torch
 
+import torch_xla.core.xla_model as xm
+
 from fairseq import checkpoint_utils, distributed_utils, models, optim, utils
 from fairseq.meters import AverageMeter, StopwatchMeter, TimeMeter
 from fairseq.optim import lr_scheduler
@@ -342,9 +344,16 @@ class Trainer(object):
                 else:
                     raise e
 
+            if self.xla and i < len(samples)-1:
+                # tpu-comment: every xla operation before marking step is
+                # appended to the IR graph, and processing too many batches
+                # before marking step can lead to OOM errors.
+                # To handle gradient accumulation use case, we explicitly
+                # mark step here for every forward pass without a backward pass
+                xm.mark_step()
+
             if self.fast_stat_sync:
                 self._all_reduce_list[5] += ooms
-
 
         if ooms > 0 and self._oom_batch is not None:
             self.handle_ooms(ooms)

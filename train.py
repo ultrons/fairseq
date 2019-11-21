@@ -513,7 +513,7 @@ def main_tpu(args):
             skip_stat_keys.update({'loss', 'nll_loss', 'gnorm'})
         progress.set_keys_to_skip_mid_epoch(skip_stat_keys)
         para_loader = pl.ParallelLoader(progress, [device])
-        tracker = train_loop_fn(
+        train_loop_fn(
             device, trainer, para_loader.per_device_loader(device),
             len(progress) - 1
         )
