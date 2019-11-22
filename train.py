@@ -142,6 +142,24 @@ def main(args, init_distributed=False):
     print('| done training in {:.1f} seconds'.format(train_meter.sum))
 
 
+def reset_training_meters(trainer):
+    # reset training meters
+    for k in [
+        'train_loss', 'train_nll_loss', 'wps', 'ups', 'wpb', 'bsz', 'gnorm', 'clip',
+    ]:
+        meter = trainer.get_meter(k)
+        if meter is not None:
+            meter.reset()
+
+
+def reset_validation_loss_meters(trainer):
+    # reset validation loss meters
+    for k in ['valid_loss', 'valid_nll_loss']:
+        meter = trainer.get_meter(k)
+        if meter is not None:
+            meter.reset()
+
+
 def train(args, trainer, task, epoch_itr):
     """Train the model for one epoch."""
     progress = initialize_loader_for_epoch(args, epoch_itr)
@@ -189,13 +207,7 @@ def train(args, trainer, task, epoch_itr):
         stats[k] = meter.avg
     progress.print(stats, tag='train', step=stats['num_updates'])
 
-    # reset training meters
-    for k in [
-        'train_loss', 'train_nll_loss', 'wps', 'ups', 'wpb', 'bsz', 'gnorm', 'clip',
-    ]:
-        meter = trainer.get_meter(k)
-        if meter is not None:
-            meter.reset()
+    reset_training_meters(trainer)
 
 
 def get_training_stats(trainer, args):
@@ -260,11 +272,7 @@ def validate(args, trainer, task, epoch_itr, subsets):
             no_progress_bar='simple'
         )
 
-        # reset validation loss meters
-        for k in ['valid_loss', 'valid_nll_loss']:
-            meter = trainer.get_meter(k)
-            if meter is not None:
-                meter.reset()
+        reset_validation_loss_meters(trainer)
         extra_meters = collections.defaultdict(lambda: AverageMeter())
 
         for sample in progress:
@@ -415,11 +423,6 @@ def main_tpu(args):
     def valid_loop_fn(
         args, device, trainer, progress, loader, last_batch_index
     ):
-        # reset validation loss meters
-        for k in ['valid_loss', 'valid_nll_loss']:
-            meter = trainer.get_meter(k)
-            if meter is not None:
-                meter.reset()
         extra_meters = collections.defaultdict(lambda: AverageMeter())
         for i, sample in enumerate(loader):
             if i == last_batch_index:
@@ -458,6 +461,7 @@ def main_tpu(args):
             no_progress_bar='simple'
         )
         para_loader = pl.ParallelLoader(progress, [device])
+        reset_validation_loss_meters(trainer)
         stats = valid_loop_fn(
             args, device, trainer, progress,
             para_loader.per_device_loader(device), len(progress) - 1
@@ -544,6 +548,7 @@ def main_tpu(args):
 
         if args.metrics_debug:
             xm.master_print(met.metrics_report())
+        reset_training_meters(trainer)
 
     train_meter.stop()
     xm.master_print('| done training in {:.1f} seconds'.format(train_meter.sum))
