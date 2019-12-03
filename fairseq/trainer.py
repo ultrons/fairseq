@@ -33,7 +33,7 @@ class Trainer(object):
     communication of the gradients across workers.
     """
 
-    def __init__(self, args, task, model, criterion, dummy_batch=None, oom_batch=None, xla=False):
+    def __init__(self, args, task, model, criterion, dummy_batch=None, oom_batch=None, xla_device=None):
         self.args = args
         self.task = task
 
@@ -65,7 +65,8 @@ class Trainer(object):
         self.fast_stat_sync = args.fast_stat_sync
 
         self.init_meters(args)
-        self.xla = xla
+        self.xla = xla_device is not None
+        self.xla_device = xla_device
 
     def init_meters(self, args):
         self.meters = OrderedDict()
@@ -208,6 +209,14 @@ class Trainer(object):
             assert last_optim['optimizer_name'] == self.optimizer.__class__.__name__, \
                 'Optimizer does not match; please reset the optimizer (--reset-optimizer).'
 
+            if self.xla:
+                # tpu-comment: send states to device before loading
+                last_optim_state = xm.send_cpu_data_to_device(
+                    last_optim_state, self.xla_device
+                )
+                last_optim['lr_scheduler_state'] = xm.send_cpu_data_to_device(
+                    last_optim['lr_scheduler_state'], self.xla_device
+                )
             if not reset_lr_scheduler:
                 self.lr_scheduler.load_state_dict(last_optim['lr_scheduler_state'])
             self.optimizer.load_state_dict(last_optim_state, optimizer_overrides)

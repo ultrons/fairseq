@@ -376,7 +376,7 @@ def main_tpu(args):
             sum(p.numel() for p in model.parameters()),
             sum(p.numel() for p in model.parameters() if p.requires_grad)))
         model = model.to(xla_device)
-        trainer = Trainer(args, task, model, criterion, xla=True)
+        trainer = Trainer(args, task, model, criterion, xla_device=xla_device)
         lr = trainer.get_lr()
 
         # Load the latest checkpoint if one is available and restore the
