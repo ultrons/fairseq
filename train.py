@@ -521,11 +521,13 @@ def main_tpu(args):
             device, trainer, para_loader.per_device_loader(device),
             len(progress) - 1
         )
-        stats = get_training_stats(trainer, args=args)
-        progress.print(stats, tag=device)
+        training_stats = get_training_stats(trainer, args=args)
+        tloss = training_stats['loss'].avg.item()
+        progress.print(training_stats, tag=device)
         xm.master_print('Epoch {} end {}'.format(epoch_itr.epoch, now()))
         if args.metrics_debug:
             xm.master_print(met.metrics_report())
+        reset_training_meters(trainer)
 
         # VALIDATION
         if not args.disable_validation and epoch_itr.epoch % args.validate_interval == 0:
@@ -533,8 +535,7 @@ def main_tpu(args):
                 args, device, trainer, task, epoch_itr, valid_subsets
             )
 
-            # only use average first validation loss from the first device
-            # to update the learning rate
+            # only use average first validation loss to update learning rate
             vloss = valid_losses[valid_subsets[0]].item()
             xm.master_print('old learning rate: {}'.format(lr))
             lr = trainer.lr_step(epoch_itr.epoch, vloss)
@@ -548,20 +549,25 @@ def main_tpu(args):
 
         if args.metrics_debug:
             xm.master_print(met.metrics_report())
-        reset_training_meters(trainer)
 
     train_meter.stop()
     xm.master_print('| done training in {:.1f} seconds'.format(train_meter.sum))
-    assert_on_losses(args, trainer)
+    assert_on_losses(args, train_loss=tloss, valid_loss=vloss)
 
 
-def assert_on_losses(args, trainer):
+def assert_on_losses(args, train_loss=None, valid_loss=None):
     if xu.getenv_as('XLA_USE_BF16', bool, False):
         return
-    valid_loss = args.target_valid_loss or math.inf
-    train_loss = args.target_train_loss or math.inf
-    assert valid_loss > trainer.meters['valid_loss'].avg.item()
-    assert train_loss > trainer.meters['train_loss'].avg.item()
+    if args.target_valid_loss is not None:
+        assert valid_loss is not None and args.target_valid_loss > valid_loss, \
+            'valid loss is {}, target is {}'.format(
+                valid_loss, args.target_valid_loss
+            )
+    if args.target_train_loss is not None:
+        assert train_loss is not None and args.target_train_loss > train_loss, \
+            'train loss is {}, target is {}'.format(
+                train_loss, args.target_train_loss
+            )
 
 
 def cli_main_gpu(args):
