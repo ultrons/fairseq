@@ -105,7 +105,7 @@ class progress_bar(object):
         """Log intermediate stats according to log_interval."""
         raise NotImplementedError
 
-    def print(self, stats, tag='', step=None):
+    def print(self, stats, tag='', step=None, **kwargs):
         """Print end-of-epoch stats."""
         raise NotImplementedError
 
@@ -157,19 +157,19 @@ class json_progress_bar(progress_bar):
         else:
             self.stats = stats
 
-    def print_mid_epoch(self, i):
+    def print_mid_epoch(self, i, **kwargs):
         size = float(len(self))
         update = self.epoch - 1 + float(i / size) if self.epoch is not None else None
         stats = self._format_stats(self.stats, epoch=self.epoch, update=update)
-        print(json.dumps(stats), flush=True)
+        print(json.dumps(stats), flush=True, **kwargs)
 
-    def print(self, stats, tag='', step=None):
+    def print(self, stats, tag='', step=None, **kwargs):
         """Print end-of-epoch stats."""
         self.stats = stats
         if tag != '':
             self.stats = OrderedDict([(tag + '_' + k, v) for k, v in self.stats.items()])
         stats = self._format_stats(self.stats, epoch=self.epoch)
-        print(json.dumps(stats), flush=True)
+        print(json.dumps(stats), flush=True, **kwargs)
 
     def _format_stats(self, stats, epoch=None, update=None):
         postfix = OrderedDict()
@@ -197,7 +197,7 @@ class noop_progress_bar(progress_bar):
         """Log intermediate stats according to log_interval."""
         pass
 
-    def print(self, stats, tag='', step=None):
+    def print(self, stats, tag='', step=None, **kwargs):
         """Print end-of-epoch stats."""
         pass
 
@@ -215,6 +215,11 @@ class simple_progress_bar(progress_bar):
             yield obj
             if self.stats is not None and i > 0 and \
                     self.log_interval is not None and i % self.log_interval == 0:
+                # tpu-comment: torch_xla's loaders iterate and queue this
+                # so we need to isolate printing from iterating here
+                # we do that by suppressing `self.log_interval` and setting it
+                # to None, and call `self.print_mid_epoch` from the training
+                # script directly
                 self.print_mid_epoch(i)
 
 
@@ -226,17 +231,18 @@ class simple_progress_bar(progress_bar):
             }
         self.stats = self._format_stats(stats)
 
-    def print_mid_epoch(self, i):
+    def print_mid_epoch(self, i, **kwargs):
         postfix = self._str_commas(self.stats)
         print(
             '{}:  {:5d} / {:d} {}'.format(self.prefix, i, len(self), postfix),
-            flush=True
+            flush=True,
+            **kwargs
         )
 
-    def print(self, stats, tag='', step=None):
+    def print(self, stats, tag='', step=None, **kwargs):
         """Print end-of-epoch stats."""
         postfix = self._str_pipes(self._format_stats(stats))
-        print('{} | {}'.format(self.prefix, postfix), flush=True)
+        print('{} | {}'.format(self.prefix, postfix), flush=True, **kwargs)
 
 
 class tqdm_progress_bar(progress_bar):
@@ -254,9 +260,10 @@ class tqdm_progress_bar(progress_bar):
         """Log intermediate stats according to log_interval."""
         self.tqdm.set_postfix(self._format_stats(stats), refresh=False)
 
-    def print(self, stats, tag='', step=None):
+    def print(self, stats, tag='', step=None, **kwargs):
         """Print end-of-epoch stats."""
         postfix = self._str_pipes(self._format_stats(stats))
+        # tpu-comment: not force printing here at the moment.
         self.tqdm.write('{} | {}'.format(self.tqdm.desc, postfix))
 
 
@@ -299,13 +306,13 @@ class tensorboard_log_wrapper(progress_bar):
         self._log_to_tensorboard(stats, tag, step)
         self.wrapped_bar.log(stats, tag=tag, step=step)
 
-    def print_mid_epoch(self, i):
-        self.wrapped_bar.print_mid_epoch(i)
+    def print_mid_epoch(self, i, **kwargs):
+        self.wrapped_bar.print_mid_epoch(i, **kwargs)
 
-    def print(self, stats, tag='', step=None):
+    def print(self, stats, tag='', step=None, **kwargs):
         """Print end-of-epoch stats."""
         self._log_to_tensorboard(stats, tag, step)
-        self.wrapped_bar.print(stats, tag=tag, step=step)
+        self.wrapped_bar.print(stats, tag=tag, step=step, **kwargs)
 
     def __exit__(self, *exc):
         for writer in getattr(self, '_writers', {}).values():

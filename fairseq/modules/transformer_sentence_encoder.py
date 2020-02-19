@@ -40,9 +40,14 @@ def init_bert_params(module):
         if module.padding_idx is not None:
             module.weight.data[module.padding_idx].zero_()
     if isinstance(module, MultiheadAttention):
-        module.q_proj.weight.data.normal_(mean=0.0, std=0.02)
-        module.k_proj.weight.data.normal_(mean=0.0, std=0.02)
-        module.v_proj.weight.data.normal_(mean=0.0, std=0.02)
+        # tpu-comment: tpus perform better with an older in_proj mechanism in
+        #  multihead_attention. Thus, we intialize compatible w/ that.
+        if module.qkv_same_dim:
+            module.in_proj_weight.data.normal_(mean=0.0, std=0.02)
+        else:
+            module.q_proj_weight.data.normal_(mean=0.0, std=0.02)
+            module.k_proj_weight.data.normal_(mean=0.0, std=0.02)
+            module.v_proj_weight.data.normal_(mean=0.0, std=0.02)
 
 
 class TransformerSentenceEncoder(nn.Module):
@@ -182,8 +187,9 @@ class TransformerSentenceEncoder(nn.Module):
 
         # compute padding mask. This is needed for multi-head attention
         padding_mask = tokens.eq(self.padding_idx)
-        if not padding_mask.any():
-            padding_mask = None
+        # tpu-comment: this is an item() call
+        # if not padding_mask.any():
+        #     padding_mask = None
 
         x = self.embed_tokens(tokens)
 

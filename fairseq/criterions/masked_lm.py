@@ -20,6 +20,7 @@ class MaskedLmLoss(FairseqCriterion):
     """
 
     def __init__(self, args, task):
+        self.use_tpu = not getattr(args, "use_gpu", True)
         super().__init__(args, task)
 
     def forward(self, model, sample, reduce=True):
@@ -29,19 +30,26 @@ class MaskedLmLoss(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
+        if not reduce:
+            raise NotImplementedError('reduce is not True')
         # compute MLM loss
         masked_tokens = sample['target'].ne(self.padding_idx)
-        sample_size = masked_tokens.int().sum().item()
-
-        # (Rare case) When all tokens are masked, the model results in empty
-        # tensor and gives CUDA error.
-        if sample_size == 0:
+        sample_size = masked_tokens.int().sum()
+        if self.use_tpu:
+            # tpu-comment: masks introduce dynamicity, and slow down tpus.
+            # In order to avoid that, we set `masked_tokens` to None
             masked_tokens = None
+        else:
+            sample_size = sample_size.item()
+            # (Rare case) When all tokens are masked, the model results in empty
+            # tensor and gives CUDA error.
+            if sample_size == 0:
+                masked_tokens = None
 
         logits = model(**sample['net_input'], masked_tokens=masked_tokens)[0]
         targets = model.get_targets(sample, [logits])
 
-        if sample_size != 0:
+        if not self.use_tpu and sample_size != 0:
             targets = targets[masked_tokens]
 
         loss = F.nll_loss(
@@ -55,8 +63,8 @@ class MaskedLmLoss(FairseqCriterion):
             ignore_index=self.padding_idx,
         )
         logging_output = {
-            'loss': utils.item(loss.data) if reduce else loss.data,
-            'nll_loss': utils.item(loss.data) if reduce else loss.data,
+            'loss': loss.data,
+            'nll_loss': loss.data,
             'ntokens': sample['ntokens'],
             'nsentences': sample['nsentences'],
             'sample_size': sample_size,

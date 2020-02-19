@@ -46,7 +46,7 @@ def _unflatten(dico):
 
 class NestedDictionaryDataset(FairseqDataset):
 
-    def __init__(self, defn, sizes=None):
+    def __init__(self, defn, sizes=None, input_shapes=None):
         super().__init__()
         self.defn = _flatten(defn)
         self.sizes = [sizes] if not isinstance(sizes, (list, tuple)) else sizes
@@ -60,6 +60,7 @@ class NestedDictionaryDataset(FairseqDataset):
                 assert len(v) == len(first), 'dataset lengths must match'
 
         self._len = len(first)
+        self.input_shapes = input_shapes
 
     def __getitem__(self, index):
         return OrderedDict((k, ds[index]) for k, ds in self.defn.items())
@@ -67,7 +68,7 @@ class NestedDictionaryDataset(FairseqDataset):
     def __len__(self):
         return self._len
 
-    def collater(self, samples):
+    def collater(self, samples, input_shapes=None):
         """Merge a list of samples to form a mini-batch.
 
         Args:
@@ -81,7 +82,10 @@ class NestedDictionaryDataset(FairseqDataset):
         sample = OrderedDict()
         for k, ds in self.defn.items():
             try:
-                sample[k] = ds.collater([s[k] for s in samples])
+                sample[k] = ds.collater(
+                    [s[k] for s in samples],
+                    input_shapes=self.input_shapes,
+                )
             except NotImplementedError:
                 sample[k] = default_collate([s[k] for s in samples])
         return _unflatten(sample)

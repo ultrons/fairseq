@@ -165,6 +165,7 @@ class MaskedLMTask(FairseqTask):
                     'ntokens': NumelDataset(src_dataset, reduce=True),
                 },
                 sizes=[src_dataset.sizes],
+                input_shapes=getattr(self.args, 'input_shapes', None),
             ),
             sort_order=[
                 shuffle,

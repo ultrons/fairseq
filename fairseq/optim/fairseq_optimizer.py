@@ -91,7 +91,8 @@ class FairseqOptimizer(object):
         if max_norm > 0:
             return torch.nn.utils.clip_grad_norm_(self.params, max_norm)
         else:
-            return math.sqrt(sum(p.grad.data.norm()**2 for p in self.params if p.grad is not None))
+            # tpu-comment: `math.sqrt` introduces an `aten::_local_scalar_dense`
+            return torch.sqrt(sum(p.grad.data.norm()**2 for p in self.params if p.grad is not None))
 
     def step(self, closure=None):
         """Performs a single optimization step."""

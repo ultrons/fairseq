@@ -152,6 +152,12 @@ def reset_training_meters(trainer):
             meter.reset()
 
 
+def reset_perf_training_meters(trainer, i, ignore_index=0):
+    if i <= ignore_index:
+        trainer.get_meter('wps').reset()
+        trainer.get_meter('ups').reset()
+
+
 def reset_validation_loss_meters(trainer):
     # reset validation loss meters
     for k in ['valid_loss', 'valid_nll_loss']:
@@ -184,9 +190,7 @@ def train(args, trainer, task, epoch_itr):
         progress.log(stats, tag='train', step=stats['num_updates'])
 
         # ignore the first mini-batch in words-per-second and updates-per-second calculation
-        if i == 0:
-            trainer.get_meter('wps').reset()
-            trainer.get_meter('ups').reset()
+        reset_perf_training_meters(trainer, i)
 
         num_updates = trainer.get_num_updates()
         if (
@@ -410,6 +414,7 @@ def main_tpu(args):
             log_output = trainer.train_step(samples)
             xm.optimizer_step(trainer.optimizer)
             tracker.add(sum(sample['nsentences'] for sample in samples))
+            reset_perf_training_meters(trainer, i, ignore_index=10)
             if (not (i % args.log_steps)) or (i == last_batch_index-1):
                 step_args = trainer, progress, args, i, tracker
                 xm.add_step_closure(print_training_update, args=step_args)
@@ -417,8 +422,9 @@ def main_tpu(args):
     def print_training_update(trainer, progress, args, i, tracker):
         stats = get_training_stats(trainer, args=args)
         stats['rate'] = tracker.rate()
+        stats['now'] = now()
         progress.log(stats, step=stats['num_updates'])
-        progress.print_mid_epoch(i+1)
+        progress.print_mid_epoch(i+1, force=True)
 
     def valid_loop_fn(
         args, device, trainer, progress, loader, last_batch_index
@@ -448,7 +454,7 @@ def main_tpu(args):
             max_sentences=args.max_sentences_valid,
             max_positions=utils.resolve_max_positions(
                 task.max_positions(),
-                list(trainer.get_model().max_positions()),
+                trainer.get_model().max_positions(),
             ),
             ignore_invalid_inputs=args.skip_invalid_size_inputs_valid_test,
             required_batch_size_multiple=args.required_batch_size_multiple,
@@ -466,7 +472,9 @@ def main_tpu(args):
             args, device, trainer, progress,
             para_loader.per_device_loader(device), len(progress) - 1
         )
-        progress.print(stats, tag=subset, step=trainer.get_num_updates())
+        progress.print(
+            stats, tag=subset, step=trainer.get_num_updates(), force=True
+        )
         xm.master_print('Validated the subset "{}", {}'.format(subset, now()))
         return stats['loss'].avg
 
@@ -523,7 +531,7 @@ def main_tpu(args):
         )
         training_stats = get_training_stats(trainer, args=args)
         tloss = training_stats['loss'].avg.item()
-        progress.print(training_stats, tag=device)
+        progress.print(training_stats, tag=device, force=True)
         xm.master_print('Epoch {} end {}'.format(epoch_itr.epoch, now()))
         if args.metrics_debug:
             xm.master_print(met.metrics_report())
@@ -540,15 +548,14 @@ def main_tpu(args):
             xm.master_print('old learning rate: {}'.format(lr))
             lr = trainer.lr_step(epoch_itr.epoch, vloss)
             xm.master_print('new learning rate: {}'.format(lr))
+            if args.metrics_debug:
+                xm.master_print(met.metrics_report())
         else:
             vloss = None
 
         # save checkpoint
         if epoch_itr.epoch % args.save_interval == 0:
             checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, vloss)
-
-        if args.metrics_debug:
-            xm.master_print(met.metrics_report())
 
     train_meter.stop()
     xm.master_print('| done training in {:.1f} seconds'.format(train_meter.sum))
@@ -681,6 +688,7 @@ def cli_main():
 
 def _mp_fn(index, args):
     torch.set_default_tensor_type('torch.FloatTensor')
+    distributed_utils.suppress_output(xm.is_master_ordinal())
     main_tpu(args)
 
 

@@ -353,12 +353,12 @@ class Trainer(object):
                 else:
                     raise e
 
-            if self.xla and i < len(samples)-1:
+            if self.xla and len(samples) > 1:
                 # tpu-comment: every xla operation before marking step is
                 # appended to the IR graph, and processing too many batches
                 # before marking step can lead to OOM errors.
                 # To handle gradient accumulation use case, we explicitly
-                # mark step here for every forward pass without a backward pass
+                # mark step here for every forward pass if we accumulate grads
                 xm.mark_step()
 
             if self.fast_stat_sync:
