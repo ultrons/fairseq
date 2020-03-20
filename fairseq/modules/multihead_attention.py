@@ -257,7 +257,7 @@ class MultiheadAttention(nn.Module):
             attn_weights = attn_weights.transpose(0, 2)
             attn_weights = attn_weights.masked_fill(key_padding_mask, float('-inf'))
             attn_weights = attn_weights.transpose(0, 2)
-            attn_weights = attn_weights.view(bsz * self.num_heads, tgt_len, src_len)
+            attn_weights = attn_weights.reshape(bsz * self.num_heads, tgt_len, src_len)
 
         if before_softmax:
             return attn_weights, v
