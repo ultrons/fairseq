@@ -18,6 +18,7 @@ from torch.serialization import default_restore_location
 from fairseq.models import FairseqEncoder, FairseqDecoder
 
 import torch_xla.core.xla_model as xm
+import torch_xla.utils.gcsfs as gcsfs
 
 
 def save_checkpoint(args, trainer, epoch_itr, val_loss):
@@ -28,7 +29,7 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss):
         best_function = max if args.maximize_best_checkpoint_metric else min
         save_checkpoint.best = best_function(val_loss, prev_best)
 
-    if args.no_save or not distributed_utils.is_master(args):
+    if args.no_save or (not trainer.xla and not distributed_utils.is_master(args)):
         return
 
     def is_better(a, b):
@@ -50,54 +51,50 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss):
         not end_of_epoch and args.save_interval_updates > 0 and
         updates % args.save_interval_updates == 0
     )
-    checkpoint_conds['checkpoint_best.pt'] = (
-        val_loss is not None and
-        (not hasattr(save_checkpoint, 'best') or is_better(val_loss, save_checkpoint.best))
-    )
-    checkpoint_conds['checkpoint_last.pt'] = not args.no_last_checkpoints
-
-    extra_state = {
-        'train_iterator': epoch_itr.state_dict(),
-        'val_loss': val_loss,
-    }
-    if hasattr(save_checkpoint, 'best'):
-        extra_state.update({'best': save_checkpoint.best})
-
     checkpoints = [os.path.join(args.save_dir, fn) for fn, cond in checkpoint_conds.items() if cond]
-
     if len(checkpoints) > 0:
+        if (
+            val_loss is not None and
+            (
+                not hasattr(save_checkpoint, 'best') or
+                is_better(val_loss, save_checkpoint.best)
+            )
+        ):
+            trainer.checkpoint_tagger.tag('best', checkpoints[0])
+        if not args.no_last_checkpoints:
+            trainer.checkpoint_tagger.tag('last', checkpoints[0])
+        extra_state = {
+            'train_iterator': epoch_itr.state_dict(),
+            'val_loss': val_loss,
+        }
+        if hasattr(save_checkpoint, 'best'):
+            extra_state.update({'best': save_checkpoint.best})
         trainer.save_checkpoint(checkpoints[0], extra_state)
-        do_copy = getattr(args, 'use_gpu', True) or xm.is_master_ordinal()
-        # tpu-comment: copy the saved checkpoint if master ordinal only
-        for cp in checkpoints[1:]:
-            try:
-                from fairseq.fb_pathmgr import fb_pathmgr
-                if do_copy:
-                    fb_pathmgr.copy(checkpoints[0], cp, True)
-            except (ModuleNotFoundError, ImportError):
-                if do_copy:
-                    shutil.copyfile(checkpoints[0], cp)
         write_timer.stop()
         print('| saved checkpoint {} (epoch {} @ {} updates) (writing took {} seconds)'.format(
-            checkpoints[0], epoch, updates, write_timer.sum))
-
-    if not end_of_epoch and args.keep_interval_updates > 0:
-        # remove old checkpoints; checkpoints are sorted in descending order
-        checkpoints = checkpoint_paths(
-            args.save_dir, pattern=r'checkpoint_\d+_(\d+)\.pt',
+            checkpoints[0], epoch, updates, write_timer.sum)
         )
-        for old_chk in checkpoints[args.keep_interval_updates:]:
-            if os.path.lexists(old_chk):
-                os.remove(old_chk)
 
-    if args.keep_last_epochs > 0:
-        # remove old epoch checkpoints; checkpoints are sorted in descending order
-        checkpoints = checkpoint_paths(
-            args.save_dir, pattern=r'checkpoint(\d+)\.pt',
-        )
-        for old_chk in checkpoints[args.keep_last_epochs:]:
-            if os.path.lexists(old_chk):
-                os.remove(old_chk)
+    # remove old checkpoints; checkpoints are sorted in descending order
+    if not args.save_dir.startswith(gcsfs.CLOUD_STORAGE_PREFIX):
+        if not end_of_epoch and args.keep_interval_updates > 0:
+            checkpoints = checkpoint_paths(
+                args.save_dir, pattern=r'checkpoint_\d+_(\d+)\.pt',
+            )
+            for old_chk in checkpoints[args.keep_interval_updates:]:
+                if os.path.lexists(old_chk):
+                    os.remove(old_chk)
+
+        if args.keep_last_epochs > 0:
+            checkpoints = checkpoint_paths(
+                args.save_dir, pattern=r'checkpoint(\d+)\.pt',
+            )
+            for old_chk in checkpoints[args.keep_last_epochs:]:
+                if os.path.lexists(old_chk):
+                    os.remove(old_chk)
+
+    if trainer.xla:
+        xm.rendezvous('fairseq.checkpoint_utils.save_checkpoint')
 
 
 def load_checkpoint(args, trainer, data_selector=None):
@@ -106,12 +103,13 @@ def load_checkpoint(args, trainer, data_selector=None):
     # tpu-comment: master ordinal check is required as distributed rank is
     #   zero for 8 devices.
     if args.distributed_rank == 0 or xm.is_master_ordinal():
-        os.makedirs(args.save_dir, exist_ok=True)
+        if not args.save_dir.startswith(gcsfs.CLOUD_STORAGE_PREFIX):
+            os.makedirs(args.save_dir, exist_ok=True)
 
     if args.restore_file == 'checkpoint_last.pt':
-        checkpoint_path = os.path.join(args.save_dir, 'checkpoint_last.pt')
+        checkpoint_path, tag = args.save_dir, 'last'
     else:
-        checkpoint_path = args.restore_file
+        checkpoint_path, tag = args.restore_file, None
 
     extra_state = trainer.load_checkpoint(
         checkpoint_path,
@@ -119,6 +117,7 @@ def load_checkpoint(args, trainer, data_selector=None):
         args.reset_lr_scheduler,
         eval(args.optimizer_overrides),
         reset_meters=args.reset_meters,
+        tag=tag,
     )
 
     if (
@@ -152,9 +151,11 @@ def load_checkpoint_to_cpu(path, arg_overrides=None):
             )
     except (ModuleNotFoundError, ImportError):
         # if path manager not found, continue with local file.
-        state = torch.load(
-            path, map_location=lambda s, l: default_restore_location(s, 'cpu'),
-        )
+        if path.startswith(gcsfs.CLOUD_STORAGE_PREFIX):
+            with gcsfs.open(path, 'rb') as fd:
+                state = torch.load(fd, map_location=lambda s, l: default_restore_location(s, 'cpu'))
+        else:
+            state = torch.load(path, map_location=lambda s, l: default_restore_location(s, 'cpu'))
     args = state['args']
     if arg_overrides is not None:
         for arg_name, arg_val in arg_overrides.items():
@@ -216,9 +217,9 @@ def checkpoint_paths(path, pattern=r'checkpoint(\d+)\.pt'):
 
 
 def torch_persistent_save(*args, **kwargs):
+    save_func = xm.save if kwargs.pop('xla', False) else torch.save
     for i in range(3):
         try:
-            save_func = xm.save if kwargs.pop('xla', False) else torch.save
             return save_func(*args, **kwargs)
         except Exception:
             if i == 2:
@@ -265,17 +266,25 @@ def save_state(
         state_dict['criterion'] = criterion.state_dict()
     if not args.no_save_optimizer_state:
         state_dict['last_optimizer_state'] = convert_state_dict_type(optimizer.state_dict())
+    xla = not getattr(args, 'use_gpu', True)
     try:
         from fairseq.fb_pathmgr import fb_pathmgr
         with fb_pathmgr.open(filename, "wb") as f:
-            torch_persistent_save(
-                state_dict, f, xla=not getattr(args, 'use_gpu', True)
-            )
+            torch_persistent_save(state_dict, f, xla=xla)
     except (ModuleNotFoundError, ImportError):
-        # if path manager not found, continue with local file.
-        torch_persistent_save(
-            state_dict, filename, xla=not getattr(args, 'use_gpu', True)
-        )
+        if filename.startswith(gcsfs.CLOUD_STORAGE_PREFIX):
+            # tpu-comment: Saving to GCS directly is problematic at the moment.
+            tmp_filename = os.path.join('/tmp', os.path.basename(filename))
+            torch_persistent_save(
+                state_dict, tmp_filename, xla=xla, global_master=True
+            )
+            if xm.is_master_ordinal(local=False):
+                with open(tmp_filename, 'rb') as fd:
+                    gcsfs.write(filename, fd.read())
+                os.remove(tmp_filename)
+        else:
+            # continue with local file.
+            torch_persistent_save(state_dict, filename, xla=xla)
 
 
 def _upgrade_state_dict(state):
@@ -442,14 +451,21 @@ def load_pretrained_component_from_model(
 
 
 def verify_checkpoint_directory(save_dir: str) -> None:
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir, exist_ok=True)
+    gcs = save_dir.startswith(gcsfs.CLOUD_STORAGE_PREFIX)
     temp_file_path = os.path.join(save_dir, 'dummy')
     try:
-        with open(temp_file_path, 'w'):
-            pass
+        if gcs:
+            gcsfs.generic_write(temp_file_path, 'a')
+        else:
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir, exist_ok=True)
+            with open(temp_file_path, 'w'):
+                pass
     except OSError as e:
         print('| Unable to access checkpoint save directory: {}'.format(save_dir))
         raise e
     else:
-        os.remove(temp_file_path)
+        if gcs:
+            gcsfs.remove(temp_file_path)
+        else:
+            os.remove(temp_file_path)

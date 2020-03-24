@@ -17,6 +17,8 @@ import sys
 import torch
 
 import torch_xla.core.xla_model as xm
+from torch_xla.utils.checkpoint_tagger import CheckpointTagger
+import torch_xla.utils.gcsfs as gcsfs
 
 from fairseq import checkpoint_utils, distributed_utils, models, optim, utils
 from fairseq.meters import AverageMeter, StopwatchMeter, TimeMeter
@@ -33,7 +35,11 @@ class Trainer(object):
     communication of the gradients across workers.
     """
 
-    def __init__(self, args, task, model, criterion, dummy_batch=None, oom_batch=None, xla_device=None):
+    def __init__(
+        self, args, task, model, criterion,
+        dummy_batch=None, oom_batch=None, xla_device=None,
+        checkpoint_tagger_filename='checkpoint_tags.json',
+    ):
         self.args = args
         self.task = task
 
@@ -67,6 +73,8 @@ class Trainer(object):
         self.init_meters(args)
         self.xla = xla_device is not None
         self.xla_device = xla_device
+        self.checkpoint_tagger = CheckpointTagger()
+        self.checkpoint_tagger_filename = checkpoint_tagger_filename
 
     def init_meters(self, args):
         self.meters = OrderedDict()
@@ -155,13 +163,34 @@ class Trainer(object):
 
     def save_checkpoint(self, filename, extra_state):
         """Save all training state in a checkpoint file."""
-        if distributed_utils.is_master(self.args):  # only save one checkpoint
+        # tpu-comment: only save one checkpoint unless xla
+        # torch_xla handles only saving from master in `xm.save`
+        if self.xla or distributed_utils.is_master(self.args):
             extra_state['train_meters'] = self.meters
             checkpoint_utils.save_state(
                 filename, self.args, self.get_model().state_dict(), self.get_criterion(),
                 self.optimizer, self.lr_scheduler, self.get_num_updates(),
                 self._optim_history, extra_state,
             )
+            gcsfs.generic_write(
+                self.checkpoint_tagger.save_to_json().encode(),
+                os.path.join(
+                    os.path.dirname(filename),
+                    self.checkpoint_tagger_filename
+                )
+            )
+
+    def bexists(self, filename):
+        if filename.startswith(gcsfs.CLOUD_STORAGE_PREFIX):
+            try:
+                # TODO: this produces long error msg if file is absent. suppress
+                gcsfs.stat(filename)
+                bexists = True
+            except Exception:
+                bexists = False
+        else:
+            bexists = os.path.exists(filename)
+        return bexists
 
     def load_checkpoint(
         self,
@@ -170,6 +199,7 @@ class Trainer(object):
         reset_lr_scheduler=False,
         optimizer_overrides=None,
         reset_meters=False,
+        tag=None,
     ):
         """Load all training state from a checkpoint file."""
         extra_state, self._optim_history, last_optim_state = None, [], None
@@ -178,7 +208,17 @@ class Trainer(object):
             from fairseq.fb_pathmgr import fb_pathmgr
             bexists = fb_pathmgr.isfile(filename)
         except Exception:
-            bexists = os.path.exists(filename)
+            bexists = False
+            if tag is not None:
+                tagger_filename = os.path.join(
+                    filename, self.checkpoint_tagger_filename
+                )
+                if self.bexists(tagger_filename):
+                    self.checkpoint_tagger = CheckpointTagger.load_from_json(
+                        gcsfs.generic_read(tagger_filename)
+                    )
+                    filename = self.checkpoint_tagger.tags[tag]
+                    bexists = self.bexists(filename)
 
         if bexists:
             state = checkpoint_utils.load_checkpoint_to_cpu(filename)
