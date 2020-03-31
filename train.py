@@ -420,7 +420,6 @@ def main_tpu(args):
                 # last batches are incomplete
                 break
             log_output = trainer.train_step(samples)
-            xm.optimizer_step(trainer.optimizer)
             tracker.add(sum(sample['nsentences'] for sample in samples))
             reset_perf_training_meters(trainer, i, ignore_index=10)
             if (not (i % args.log_steps)) or (i == last_batch_index-1):

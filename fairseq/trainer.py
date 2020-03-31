@@ -472,6 +472,10 @@ class Trainer(object):
             # normalize grads by sample size
             if sample_size > 0:
                 self.optimizer.multiply_grads(self.args.distributed_world_size / float(sample_size))
+            if self.xla:
+                # tpu-comment: for tpu training, we need to explicitly reduce
+                #   gradients here
+                xm.reduce_gradients(self.optimizer)
 
             # clip grads
             grad_norm = self.optimizer.clip_grad_norm(self.args.clip_norm)
@@ -479,11 +483,7 @@ class Trainer(object):
 
             # take an optimization step
 
-            # tpu-comment: xla takes care of optimization step using
-            #   `torch_xla.core.xla_model.optimizer_step`
-            # so skip optimization step here in that case
-            if not self.xla:
-                self.optimizer.step()
+            self.optimizer.step()
             self.set_num_updates(self.get_num_updates() + 1)
 
             # task specific update per step
