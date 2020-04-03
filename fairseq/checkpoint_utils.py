@@ -21,7 +21,9 @@ import torch_xla.core.xla_model as xm
 import torch_xla.utils.gcsfs as gcsfs
 
 
-def save_checkpoint(args, trainer, epoch_itr, val_loss):
+def save_checkpoint(
+    args, trainer, epoch_itr, val_loss, epoch=None, end_of_epoch=None
+):
     from fairseq import distributed_utils, meters
 
     prev_best = getattr(save_checkpoint, 'best', val_loss)
@@ -38,8 +40,10 @@ def save_checkpoint(args, trainer, epoch_itr, val_loss):
     write_timer = meters.StopwatchMeter()
     write_timer.start()
 
-    epoch = epoch_itr.epoch
-    end_of_epoch = epoch_itr.end_of_epoch()
+    epoch = epoch_itr.epoch if epoch is None else epoch
+    end_of_epoch = (
+        epoch_itr.end_of_epoch() if end_of_epoch is None else end_of_epoch
+    )
     updates = trainer.get_num_updates()
 
     checkpoint_conds = collections.OrderedDict()

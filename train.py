@@ -201,7 +201,6 @@ def train(args, trainer, task, epoch_itr):
         ):
             valid_losses = validate(args, trainer, task, epoch_itr, valid_subsets)
             checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, valid_losses[0])
-
         if num_updates >= max_update:
             break
 
@@ -406,25 +405,40 @@ def main_tpu(args):
         This is the main training loop. It trains for 1 epoch.
         """
 
-        def print_training_update(trainer, progress, args, i, tracker):
+        def print_training_update(trainer, progress, args, i):
             stats = get_training_stats(trainer, args=args)
-            stats['rate'] = tracker.rate()
             stats['now'] = now()
             progress.log(stats, tag='train', step=trainer.get_num_updates())
             progress.print_mid_epoch(i+1, force=True)
 
         stats, log_output, skip_stat_keys = None, None, {'clip'}
-        tracker = xm.RateTracker()
+        max_update = args.max_update or math.inf
         for i, samples in enumerate(loader, start=epoch_itr.iterations_in_epoch):
             if i == last_batch_index:
                 # last batches are incomplete
                 break
             log_output = trainer.train_step(samples)
-            tracker.add(sum(sample['nsentences'] for sample in samples))
             reset_perf_training_meters(trainer, i, ignore_index=10)
             if (not (i % args.log_steps)) or (i == last_batch_index-1):
-                step_args = trainer, progress, args, i, tracker
+                step_args = trainer, progress, args, i
                 xm.add_step_closure(print_training_update, args=step_args)
+            num_updates = trainer.get_num_updates()
+            if (
+                not args.disable_validation
+                and args.save_interval_updates > 0
+                and num_updates % args.save_interval_updates == 0
+                and num_updates > 0
+            ):
+                vloss = validate_subset(
+                    args, device, trainer, task, epoch_itr, valid_subsets[0]
+                )
+                checkpoint_utils.save_checkpoint(
+                    args, trainer, epoch_itr, vloss.item(),
+                    epoch=epoch, end_of_epoch=False,
+                )
+            if num_updates >= max_update:
+                break
+
 
     def valid_loop_fn(
         args, device, trainer, progress, loader, last_batch_index
@@ -517,7 +531,8 @@ def main_tpu(args):
     train_meter.start()
     while keep_training(lr, epoch_itr, trainer):
         # TRAINING
-        xm.master_print('Epoch {} begin {}'.format(epoch_itr.epoch + 1, now()))
+        epoch = epoch_itr.epoch + 1
+        xm.master_print('Epoch {} begin {}'.format(epoch, now()))
         progress = initialize_loader_for_epoch(
             args, epoch_itr, prefix='training on {}'.format(device),
         )
@@ -560,7 +575,10 @@ def main_tpu(args):
 
         # save checkpoint
         if epoch_itr.epoch % args.save_interval == 0:
-            checkpoint_utils.save_checkpoint(args, trainer, epoch_itr, vloss)
+            checkpoint_utils.save_checkpoint(
+                args, trainer, epoch_itr, vloss,
+                epoch=epoch, end_of_epoch=True,
+            )
 
     train_meter.stop()
     xm.master_print('| done training in {:.1f} seconds'.format(train_meter.sum))
