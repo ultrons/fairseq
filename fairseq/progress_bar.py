@@ -340,6 +340,10 @@ class tensorboard_log_wrapper(progress_bar):
                 if isinstance(logval, torch.Tensor):
                     logval = logval.item()
                 writer.add_scalar(key, logval, step)
+            elif isinstance(stats[key], (TimeMeter, StopwatchMeter)):
+                logval = stats[key].avg
+                if logval:
+                    writer.add_scalar(key, logval, step)
             elif isinstance(stats[key], Number):
                 writer.add_scalar(key, stats[key], step)
 
