@@ -409,13 +409,16 @@ def main_tpu(args):
             stats = get_training_stats(trainer, args=args)
             stats['now'] = now()
             progress.log(stats, tag='train', step=trainer.get_num_updates())
-            progress.print_mid_epoch(i+1, force=True)
+            #progress.print_mid_epoch(i+1, force=True)
 
         stats, log_output, skip_stat_keys = None, None, {'clip'}
         max_update = args.max_update or math.inf
+        xm.master_print("size fo the dataset..{}".format(len(loader)))
         for i, samples in enumerate(loader, start=epoch_itr.iterations_in_epoch):
             if i == last_batch_index:
                 # last batches are incomplete
+                break
+            if i > max_update:
                 break
             log_output = trainer.train_step(samples)
             reset_perf_training_meters(trainer, i, ignore_index=10)
@@ -436,6 +439,7 @@ def main_tpu(args):
                     args, trainer, epoch_itr, vloss.item(),
                     epoch=epoch, end_of_epoch=False,
                 )
+                
             if num_updates >= max_update:
                 break
 
@@ -507,6 +511,7 @@ def main_tpu(args):
         max_epoch = args.max_epoch or math.inf
         max_update = args.max_update or math.inf
         lr, n_updates = trainer.get_lr(), trainer.get_num_updates()
+        xm.master_print('DEBUG_MESSAGE: max_update: {}, m_update: {}'.format(max_update, n_updates))
         return ((lr > args.min_lr) and (epoch_itr.epoch < max_epoch) and
             (n_updates < max_update))
 
@@ -529,6 +534,7 @@ def main_tpu(args):
 
     train_meter = StopwatchMeter()
     train_meter.start()
+    break_from_loop = None
     while keep_training(lr, epoch_itr, trainer):
         # TRAINING
         epoch = epoch_itr.epoch + 1
@@ -546,7 +552,7 @@ def main_tpu(args):
             len(progress) - 1
         )
         training_stats = get_training_stats(trainer, args=args)
-        tloss = training_stats['loss'].avg.item()
+        #tloss = training_stats['loss'].avg.item()
         progress_bar.progress_bar_print(
             progress, training_stats, tag='train', force=True,
             step=trainer.get_num_updates(), log_xla_metrics=True,
@@ -579,10 +585,15 @@ def main_tpu(args):
                 args, trainer, epoch_itr, vloss,
                 epoch=epoch, end_of_epoch=True,
             )
+        if not break_from_loop:
+            break_from_loop = 1
+        else:
+            break
+
 
     train_meter.stop()
     xm.master_print('| done training in {:.1f} seconds'.format(train_meter.sum))
-    assert_on_losses(args, train_loss=tloss, valid_loss=vloss)
+    #assert_on_losses(args, train_loss=tloss, valid_loss=vloss)
 
 
 def assert_on_losses(args, train_loss=None, valid_loss=None):

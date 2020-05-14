@@ -322,6 +322,14 @@ class Trainer(object):
 
         if not dummy_batch:
             self.meters['train_wall'].start()
+        def metsumm(stepno=''):
+            import torch_xla.debug.metrics as met
+            x = met.metrics_report().split('\n')
+            for i, line in enumerate(x):
+                if 'CompileTime' in line or 'aten::' in line:
+                    key = line.split()[-1]
+                    value = x[i+1].split()[-1]
+                    print('step {}, key {}, value {}'.format(stepno, key, value)) 
 
         # forward and backward pass
         logging_outputs, sample_sizes, ooms = [], [], 0
@@ -353,10 +361,12 @@ class Trainer(object):
             try:
                 with maybe_no_sync():
                     # forward and backward
+                    metsumm("DEBUG_MESSAGE: Before forward step....")
                     loss, sample_size, logging_output = self.task.train_step(
                         sample, self.model, self.criterion, self.optimizer,
                         ignore_grad
                     )
+                    metsumm("DEBUG_MESSAGE: After forward step....")
 
                 if not ignore_grad:
                     logging_outputs.append(logging_output)
@@ -483,7 +493,9 @@ class Trainer(object):
 
             # take an optimization step
 
+            metsumm("DEBUG_MESSAGE: Before optimizer step....")
             self.optimizer.step()
+            metsumm("DEBUG_MESSAGE: After optimizer step....")
             self.set_num_updates(self.get_num_updates() + 1)
 
             # task specific update per step
