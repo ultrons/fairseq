@@ -20,6 +20,7 @@ from fairseq.file_io import PathManager
 from fairseq.logging import meters, metrics
 from fairseq.nan_detector import NanDetector
 from fairseq.optim import lr_scheduler
+from fairseq.metsumm import metsumm
 
 
 logger = logging.getLogger(__name__)
@@ -399,6 +400,7 @@ class Trainer(object):
             try:
                 with maybe_no_sync():
                     # forward and backward
+                    metsumm("DEBUG_MESSAGE: Before TASK.Train Step")
                     loss, sample_size_i, logging_output = self.task.train_step(
                         sample=sample,
                         model=self.model,
@@ -407,6 +409,7 @@ class Trainer(object):
                         update_num=self.get_num_updates(),
                         ignore_grad=is_dummy_batch,
                     )
+                    metsumm("DEBUG_MESSAGE: After TASK.Train Step")
                     del loss
 
                 logging_outputs.append(logging_output)
@@ -451,6 +454,7 @@ class Trainer(object):
 
         # gather logging outputs from all replicas
         if self._sync_stats():
+
             logging_outputs, (sample_size, ooms) = self._aggregate_logging_outputs(
                 logging_outputs, sample_size, ooms, ignore=is_dummy_batch,
             )
@@ -483,7 +487,9 @@ class Trainer(object):
                 self._check_grad_norms(grad_norm)
 
             # take an optimization step
+            metsumm("DEBUG_MESSAGE: Before Optimizer Step")
             self.optimizer.step()
+            metsumm("DEBUG_MESSAGE: After Optimizer Step")
         except FloatingPointError:
             # re-run the forward and backward pass with hooks attached to print out where it fails
             with NanDetector(self.model):
@@ -504,11 +510,14 @@ class Trainer(object):
             raise e
 
         # Some distributed wrappers (e.g., SlowMo) need access to the optimizer after the step
+        metsumm("DEBUG_MESSAGE: Before Additional Opt")
         if hasattr(self.model, 'perform_additional_optimizer_actions'):
+            metsumm("DEBUG_MESSAGE: Before Additional Opt: Opt Action")
             if hasattr(self.optimizer, 'fp32_params'):
                 self.model.perform_additional_optimizer_actions(self.optimizer.optimizer, self.optimizer.fp32_params)
             else:
                 self.model.perform_additional_optimizer_actions(self.optimizer.optimizer)
+            metsumm("DEBUG_MESSAGE: After Additional Opt: Opt Action")
 
         if not overflow or self.args.distributed_wrapper == 'SlowMo':
             self.set_num_updates(self.get_num_updates() + 1)
@@ -522,9 +531,11 @@ class Trainer(object):
                 # this causes wps to be misreported when log_interval > 1
                 logging_output = {}
                 if self.get_num_updates() % self.args.log_interval == 0:
+                    metsumm("DEBUG_MESSAGE: Before Additional Opt reduce log stat")
                     logging_output = self._reduce_and_log_stats(
                         logging_outputs, sample_size, grad_norm,
                     )
+                    metsumm("DEBUG_MESSAGE: After Additional Opt reduce log stat")
 
                 # log whenever there's an XLA compilation, since these
                 # slow down training and may indicate opportunities for
@@ -546,6 +557,7 @@ class Trainer(object):
                     ) == 0
                 ):
                     torch.cuda.empty_cache()
+        metsumm("DEBUG_MESSAGE: After Additional Opt")
 
         if self.args.fp16:
             metrics.log_scalar("loss_scale", self.optimizer.scaler.loss_scale, priority=700, round=0)

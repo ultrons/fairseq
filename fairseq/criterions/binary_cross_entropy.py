@@ -10,6 +10,7 @@ import torch.nn.functional as F
 
 from fairseq import utils
 from fairseq.criterions import FairseqCriterion, register_criterion
+from fairseq.metsumm import metsumm
 
 
 @register_criterion('binary_cross_entropy')
@@ -40,15 +41,21 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
+        metsumm("DEBUG_MESSAGE: Before Model Forward")
         net_output = model(**sample['net_input'])
+        metsumm("DEBUG_MESSAGE: After Model Forward")
         logits = model.get_logits(net_output).float()
+        metsumm("DEBUG_MESSAGE: After logits to float ")
         target = model.get_targets(sample, net_output)
+        metsumm("DEBUG_MESSAGE: After get target call")
 
         weights = None
+        metsumm("DEBUG_MESSAGE: Before Get Target Weightss.")
         if hasattr(model, 'get_target_weights') and not self.infonce:
             weights = model.get_target_weights(target, net_output)
             if torch.is_tensor(weights):
                 weights = weights.float()
+        metsumm("DEBUG_MESSAGE: After Get Target Weightss.")
 
         losses = []
 
@@ -56,8 +63,10 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
             loss = F.cross_entropy(logits, target, reduction="sum" if reduce else "none",)
         else:
             loss = F.binary_cross_entropy_with_logits(logits, target.float(), weights, reduction="sum" if reduce else "none",)
+        metsumm("DEBUG_MESSAGE: After CE Computation")
 
-        sample_size = target.numel() if self.infonce else target.long().sum().item()
+        #sample_size = target.numel() if self.infonce else target.sum().long().item()
+        sample_size = target.numel()
         losses.append(loss)
 
         if self.loss_weights is not None and hasattr(model, "get_extra_losses"):
@@ -73,20 +82,24 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
                     loss += p
                     losses.append(p)
 
+            #'loss': loss.item() if reduce else loss,
         logging_output = {
-            'loss': loss.item() if reduce else loss,
+            'loss': loss,
             'ntokens': sample_size,
             'nsentences': logits.size(0),
             'sample_size': sample_size,
         }
+        metsumm("DEBUG_MESSAGE: After recording loss")
 
         for lk in self.log_keys:
             if lk in net_output:
                 logging_output[lk] = float((net_output[lk]))
+        metsumm("DEBUG_MESSAGE: After recording net output")
 
         if len(losses) > 1:
             for i, l in enumerate(losses):
                 logging_output[f'loss_{i}'] = l.item()
+        metsumm("DEBUG_MESSAGE: INFO NCE: {}:LOG_PRED {}:".format(self.infonce, log_pred))
 
         if self.infonce:
             with torch.no_grad():
@@ -107,6 +120,7 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
         if log_pred:
             logging_output['logits'] = logits.cpu().numpy()
             logging_output['target'] = target.cpu().numpy()
+        metsumm("DEBUG_MESSAGE: LOSS FORWARD")
         return loss, sample_size, logging_output
 
     @staticmethod

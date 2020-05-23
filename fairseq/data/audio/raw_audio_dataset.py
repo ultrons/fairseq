@@ -151,6 +151,13 @@ class FileAudioDataset(RawAudioDataset):
 
         fname = os.path.join(self.root_dir, self.fnames[index])
         wav, curr_sample_rate = sf.read(fname)
-        feats = torch.from_numpy(wav).float()
+        wav_padded = np.zeros(self.max_sample_size)
+        if wav.shape[0] > self.max_sample_size:
+            wav_padded = wav[:self.max_sample_size]
+        else: 
+            wav_padded[:wav.shape[0]]=wav
+        #feats = torch.from_numpy(wav).float()
+        feats = torch.from_numpy(wav_padded).float()
+        #print("DEBUG_MESSAGE:i WAV SHAPE", wav.shape, wav_padded.shape)
         feats = self.postprocess(feats, curr_sample_rate)
         return {"id": index, "source": feats}
