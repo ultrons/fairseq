@@ -28,6 +28,7 @@ from fairseq.data import iterators
 from fairseq.logging import meters, metrics, progress_bar
 from fairseq.trainer import Trainer
 from fairseq.model_parallel.megatron_trainer import MegatronTrainer
+from fairseq.metsumm import metsumm
 
 
 logging.basicConfig(
@@ -202,16 +203,25 @@ def train(args, trainer, task, epoch_itr, max_update=math.inf):
 
     valid_subsets = args.valid_subset.split(',')
     for samples in progress:
+        #print("DEBUG_MESSAGE:", len(samples))
+        #for i in samples:
+        #    print(i['net_input']['source'].size())
+        #continue
         with metrics.aggregate('train_inner'):
+            metsumm("DEBUG_MESSAGE: Before Main Train Step.")
             log_output = trainer.train_step(samples)
+            metsumm("DEBUG_MESSAGE: After Main Train Step.")
             if log_output is None:  # OOM, overflow, ...
                 continue
 
         # log mid-epoch stats
         num_updates = trainer.get_num_updates()
         if num_updates % args.log_interval == 0:
+            metsumm("DEBUG_MESSAGE: Before Get Training Stat")
             stats = get_training_stats(metrics.get_smoothed_values('train_inner'))
+            metsumm("DEBUG_MESSAGE: After Get Training Stat")
             progress.log(stats, tag='train_inner', step=num_updates)
+            metsumm("DEBUG_MESSAGE: After Progress Logging")
 
             # reset mid-epoch stats after each log interval
             # the end-of-epoch stats will still be preserved
