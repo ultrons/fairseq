@@ -30,4 +30,6 @@ train.py \
 --max-sample-size 150000 \
 --max-tokens 1500000 \
 --skip-invalid-size-inputs-valid-test \
---log-interval 1
+--log-interval 4 \
+--log-format simple \
+

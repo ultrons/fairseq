@@ -39,6 +39,8 @@ class Trainer(object):
     def __init__(self, args, task, model, criterion, quantizer=None):
         self.args = args
         self.task = task
+        self.logging_history = []
+        self.cumm_sample_size = 0
 
         # catalog shared parameters
         shared_params = _catalog_shared_params(model)
@@ -414,6 +416,7 @@ class Trainer(object):
 
                 logging_outputs.append(logging_output)
                 sample_size += sample_size_i
+                print("DEBUG_MESSAGE: Inputshape", sample["net_input"]["source"].size()) 
 
                 # emptying the CUDA cache after the first step can
                 # reduce the chance of OOM
@@ -525,16 +528,23 @@ class Trainer(object):
             if self.tpu:
                 # mark step on TPUs
                 import torch_xla.core.xla_model as xm
+                metsumm("DEBUG_MESSAGE: Before MARK Step")
                 xm.mark_step()
+                metsumm("DEBUG_MESSAGE: After MARK Step")
 
                 # only log stats every log_interval steps
                 # this causes wps to be misreported when log_interval > 1
+                self.logging_history += logging_outputs
+                self.cumm_sample_size += sample_size
                 logging_output = {}
                 if self.get_num_updates() % self.args.log_interval == 0:
                     metsumm("DEBUG_MESSAGE: Before Additional Opt reduce log stat")
                     logging_output = self._reduce_and_log_stats(
-                        logging_outputs, sample_size, grad_norm,
+                        #logging_outputs, sample_size, grad_norm,
+                        self.logging_history, self.cumm_sample_size, grad_norm,
                     )
+                    self.logging_history = []
+                    self.cumm_sample_size = 0
                     metsumm("DEBUG_MESSAGE: After Additional Opt reduce log stat")
 
                 # log whenever there's an XLA compilation, since these

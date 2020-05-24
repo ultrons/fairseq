@@ -123,6 +123,7 @@ class TimeMeter(Meter):
         self.start = time.perf_counter()
         self.n = n
         self.i = 0
+        print("DEBUG_MESSAGE: Time Meter created at:", self.start)
 
     def update(self, val=1):
         self.n = type_as(self.n, val) + val
@@ -145,6 +146,7 @@ class TimeMeter(Meter):
 
     @property
     def avg(self):
+        print("DEBUG_MESSAGE: Elapsed Time:",self.n, self.elapsed_time) 
         return self.n / self.elapsed_time
 
     @property
@@ -153,6 +155,7 @@ class TimeMeter(Meter):
 
     @property
     def smoothed_value(self) -> float:
+        print("DEBUG_MESSAGE: Smooth Value Called")
         val = self.avg
         if self.round is not None and val is not None:
             val = safe_round(val, self.round)
@@ -209,6 +212,7 @@ class StopwatchMeter(Meter):
 
     @property
     def smoothed_value(self) -> float:
+        print("DEBUG_MESSAGE: Meter Key:" , self.avg, self.sum, self.n)
         val = self.avg if self.sum > 0 else self.elapsed_time
         if self.round is not None and val is not None:
             val = safe_round(val, self.round)
@@ -256,6 +260,7 @@ class MetersDict(OrderedDict):
     def get_smoothed_value(self, key: str) -> float:
         """Get a single smoothed value."""
         meter = self[key]
+        print("DEBUG_MESSAGE: Meter Key:" , key, meter)
         if isinstance(meter, MetersDict._DerivedMeter):
             return meter.fn(self)
         else:

@@ -8,7 +8,7 @@ import math
 import torch
 import torch.nn.functional as F
 
-from fairseq import utils
+from fairseq import utils, metrics
 from fairseq.criterions import FairseqCriterion, register_criterion
 from fairseq.metsumm import metsumm
 
@@ -41,21 +41,15 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        metsumm("DEBUG_MESSAGE: Before Model Forward")
         net_output = model(**sample['net_input'])
-        metsumm("DEBUG_MESSAGE: After Model Forward")
-        logits = model.get_logits(net_output).float()
-        metsumm("DEBUG_MESSAGE: After logits to float ")
+        logits = model.get_logits(net_output).float() #DEB: No incr
         target = model.get_targets(sample, net_output)
-        metsumm("DEBUG_MESSAGE: After get target call")
 
         weights = None
-        metsumm("DEBUG_MESSAGE: Before Get Target Weightss.")
         if hasattr(model, 'get_target_weights') and not self.infonce:
             weights = model.get_target_weights(target, net_output)
             if torch.is_tensor(weights):
                 weights = weights.float()
-        metsumm("DEBUG_MESSAGE: After Get Target Weightss.")
 
         losses = []
 
@@ -63,10 +57,9 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
             loss = F.cross_entropy(logits, target, reduction="sum" if reduce else "none",)
         else:
             loss = F.binary_cross_entropy_with_logits(logits, target.float(), weights, reduction="sum" if reduce else "none",)
-        metsumm("DEBUG_MESSAGE: After CE Computation")
 
-        #sample_size = target.numel() if self.infonce else target.sum().long().item()
-        sample_size = target.numel()
+        sample_size = target.numel() if self.infonce else target.sum().long()
+        #sample_size = target.numel()
         losses.append(loss)
 
         if self.loss_weights is not None and hasattr(model, "get_extra_losses"):
@@ -89,17 +82,16 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
             'nsentences': logits.size(0),
             'sample_size': sample_size,
         }
-        metsumm("DEBUG_MESSAGE: After recording loss")
 
         for lk in self.log_keys:
             if lk in net_output:
-                logging_output[lk] = float((net_output[lk]))
-        metsumm("DEBUG_MESSAGE: After recording net output")
+                #logging_output[lk] = float((net_output[lk]))
+                logging_output[lk] = net_output[lk] #float causes 3 comp, 2 aten calls
 
         if len(losses) > 1:
             for i, l in enumerate(losses):
-                logging_output[f'loss_{i}'] = l.item()
-        metsumm("DEBUG_MESSAGE: INFO NCE: {}:LOG_PRED {}:".format(self.infonce, log_pred))
+                #logging_output[f'loss_{i}'] = l.item()
+                logging_output[f'loss_{i}'] = l
 
         if self.infonce:
             with torch.no_grad():
@@ -120,37 +112,60 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
         if log_pred:
             logging_output['logits'] = logits.cpu().numpy()
             logging_output['target'] = target.cpu().numpy()
-        metsumm("DEBUG_MESSAGE: LOSS FORWARD")
         return loss, sample_size, logging_output
 
+#    @staticmethod
+#    def aggregate_logging_outputs(logging_outputs):
+#        """Aggregate logging outputs from data parallel training."""
+#        loss_sum = utils.item(sum(log.get('loss', 0) for log in logging_outputs))
+#        ntokens = utils.item(sum(log.get('ntokens', 0) for log in logging_outputs))
+#        nsentences = utils.item(sum(log.get('nsentences', 0) for log in logging_outputs))
+#        sample_size = utils.item(sum(log.get('sample_size', 0) for log in logging_outputs))
+#        agg_output = {
+#            'loss': loss_sum / sample_size / math.log(2),
+#            'ntokens': ntokens,
+#            'nsentences': nsentences,
+#            'sample_size': sample_size,
+#        }
+#        if sample_size != ntokens:
+#            agg_output['nll_loss'] = loss_sum / ntokens / math.log(2)
+#
+#        correct = sum(log.get("correct", 0) for log in logging_outputs)
+#        total = sum(log.get("count", 0) for log in logging_outputs)
+#        if total > 0:
+#            agg_output['accuracy'] = correct / total
+#
+#        builtin_keys = {'loss', 'ntokens', 'nsentences', 'sample_size', 'correct', 'count'}
+#
+#        for k in logging_outputs[0]:
+#            if k not in builtin_keys:
+#                val = sum(log.get(k, 0) for log in logging_outputs) / len(logging_outputs)
+#                if k.startswith('loss'):
+#                    val = val / ntokens if ntokens > 0 else float('nan')
+#                agg_output[k] = val
+#
+#        return agg_output
+    
     @staticmethod
-    def aggregate_logging_outputs(logging_outputs):
+    def reduce_metrics(logging_outputs) -> None:
         """Aggregate logging outputs from data parallel training."""
-        loss_sum = utils.item(sum(log.get('loss', 0) for log in logging_outputs))
-        ntokens = utils.item(sum(log.get('ntokens', 0) for log in logging_outputs))
-        nsentences = utils.item(sum(log.get('nsentences', 0) for log in logging_outputs))
-        sample_size = utils.item(sum(log.get('sample_size', 0) for log in logging_outputs))
-        agg_output = {
-            'loss': loss_sum / sample_size / math.log(2),
-            'ntokens': ntokens,
-            'nsentences': nsentences,
-            'sample_size': sample_size,
-        }
+        loss_sum = sum(log.get('loss', 0) for log in logging_outputs)
+        ntokens = sum(log.get('ntokens', 0) for log in logging_outputs)
+        sample_size = sum(log.get('sample_size', 0) for log in logging_outputs)
         if sample_size != ntokens:
-            agg_output['nll_loss'] = loss_sum / ntokens / math.log(2)
+            metrics.log_scalar('nll_loss', loss_sum / ntokens / math.log(2), round=3)
 
+        metrics.log_scalar('loss', loss_sum / sample_size / math.log(2), sample_size, round=3)
         correct = sum(log.get("correct", 0) for log in logging_outputs)
         total = sum(log.get("count", 0) for log in logging_outputs)
         if total > 0:
-            agg_output['accuracy'] = correct / total
+            metrics.log_scalar('accuracy', correct / total, round=3)
 
-        builtin_keys = {'loss', 'ntokens', 'nsentences', 'sample_size', 'correct', 'count'}
-
-        for k in logging_outputs[0]:
-            if k not in builtin_keys:
-                val = sum(log.get(k, 0) for log in logging_outputs) / len(logging_outputs)
-                if k.startswith('loss'):
-                    val = val / ntokens if ntokens > 0 else float('nan')
-                agg_output[k] = val
-
-        return agg_output
+    @staticmethod
+    def logging_outputs_can_be_summed() -> bool:
+        """
+        Whether the logging outputs returned by `forward` can be summed
+        across workers prior to calling `reduce_metrics`. Setting this
+        to True will improves distributed training speed.
+        """
+        return True

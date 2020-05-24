@@ -1,6 +1,5 @@
-#/home/sivaibhav/xla/scripts/debug_run.py \
-# --tidy --outfile /tmp/debug_run.tar.gz -- python -u \
-python \
+/home/sivaibhav/xla/scripts/debug_run.py \
+ --tidy --outfile /tmp/debug_run_`date +%d%m%y_%H_%M_%S`.tar.gz -- python -u \
  train.py \
  /home/sivaibhav/fairseq/wav2vec/manifest \
 	 --tpu \
@@ -30,6 +29,6 @@ python \
 --criterion binary_cross_entropy \
 --num-negatives 10 \
 --max-sample-size 150000 \
-	--max-tokens 300000 --cross-sample-negatives 0 --update-freq 1 --seed 2 --skip-invalid-size-inputs-valid-test
+	--max-tokens 300000 --cross-sample-negatives 0 --update-freq 1 --seed 2 --skip-invalid-size-inputs-valid-test \
 --skip-invalid-size-inputs-valid-test \
---log-interval 1
+--log-interval 20
