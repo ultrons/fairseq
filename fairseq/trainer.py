@@ -889,7 +889,9 @@ class Trainer(object):
 
         with metrics.aggregate() as agg:
             if logging_outputs is not None:
+                metsumm("DEBUG_MESSAGE: Before reduce meterics")
                 self.task.reduce_metrics(logging_outputs, self.get_criterion())
+                metsumm("DEBUG_MESSAGE: After reduce meterics")
                 del logging_outputs
 
             # support legacy interface

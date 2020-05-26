@@ -58,7 +58,9 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
         else:
             loss = F.binary_cross_entropy_with_logits(logits, target.float(), weights, reduction="sum" if reduce else "none",)
 
+        metsumm("DEBUG_MESSAGE: Before  target sum long")
         sample_size = target.numel() if self.infonce else target.sum().long()
+        metsumm("DEBUG_MESSAGE: After  target sum long")
         #sample_size = target.numel()
         losses.append(loss)
 
@@ -77,7 +79,7 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
 
             #'loss': loss.item() if reduce else loss,
         logging_output = {
-            'loss': loss,
+            'loss': loss.data,
             'ntokens': sample_size,
             'nsentences': logits.size(0),
             'sample_size': sample_size,
@@ -149,13 +151,19 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
     @staticmethod
     def reduce_metrics(logging_outputs) -> None:
         """Aggregate logging outputs from data parallel training."""
-        loss_sum = sum(log.get('loss', 0) for log in logging_outputs)
+        metsumm("DEBUG_MESSAGE: before loss extract")
+        #loss_ = [log['loss'].item() for log in logging_outputs] # Result in 6X fewer aten:_local_scalar_dense
+        #loss_ = torch.stack([log['loss'] for log in logging_outputs]) # Result in 6X fewer aten:_local_scalar_dense
+        #loss_sum = loss_.sum()
+        loss_ = [log.get('loss', 0) for log in logging_outputs]
+        loss_sum = sum(loss_)
+        metsumm("DEBUG_MESSAGE: After loss extract {}".format(loss_))
         ntokens = sum(log.get('ntokens', 0) for log in logging_outputs)
         sample_size = sum(log.get('sample_size', 0) for log in logging_outputs)
         if sample_size != ntokens:
             metrics.log_scalar('nll_loss', loss_sum / ntokens / math.log(2), round=3)
-
         metrics.log_scalar('loss', loss_sum / sample_size / math.log(2), sample_size, round=3)
+        metsumm("DEBUG_MESSAGE: After loss scaling")
         correct = sum(log.get("correct", 0) for log in logging_outputs)
         total = sum(log.get("count", 0) for log in logging_outputs)
         if total > 0:

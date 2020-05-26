@@ -8,7 +8,7 @@ train.py \
 --save-dir /home/sivaibhav/wav2vec/model \
 --num-workers 6 \
 --bf16 \
---max-update 400 \
+--max-update 40 \
 --save-interval 1 \
 --no-epoch-checkpoints \
 --arch wav2vec \

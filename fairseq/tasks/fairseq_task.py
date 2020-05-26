@@ -9,6 +9,7 @@ import torch
 
 from fairseq import metrics, search, tokenizer, utils
 from fairseq.data import data_utils, FairseqDataset, iterators, Dictionary
+from fairseq.metsumm import metsumm
 
 
 class FairseqTask(object):
@@ -391,10 +392,12 @@ class FairseqTask(object):
                 "ntokens not found in Criterion logging outputs, cannot log wpb or wps"
             )
         else:
-            print("DEBUG_MESSSAGE: Logging Outputs:", logging_outputs)
             ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
+            metsumm("DEBUG_MESSAGE: After ntoken extraction")
             metrics.log_scalar("wpb", ntokens, priority=180, round=1)
+            metsumm("DEBUG_MESSAGE: After wpb extraction")
             metrics.log_speed("wps", ntokens, priority=90, round=1)
+            metsumm("DEBUG_MESSAGE: After wpsntoken extraction")
 
         if not any("nsentences" in log for log in logging_outputs):
             warnings.warn(
