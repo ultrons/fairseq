@@ -8,6 +8,7 @@ from collections import OrderedDict
 import time
 from typing import Dict, Optional
 
+#from fairseq.metsumm import metsumm
 try:
     import torch
 
@@ -123,7 +124,7 @@ class TimeMeter(Meter):
         self.start = time.perf_counter()
         self.n = n
         self.i = 0
-        print("DEBUG_MESSAGE: Time Meter created at:", self.start)
+###        print("DEBUG_MESSAGE: Time Meter created at:", self.start)
 
     def update(self, val=1):
         self.n = type_as(self.n, val) + val
@@ -146,7 +147,7 @@ class TimeMeter(Meter):
 
     @property
     def avg(self):
-        print("DEBUG_MESSAGE: Elapsed Time:",self.n, self.elapsed_time) 
+###        print("DEBUG_MESSAGE: Elapsed Time:",self.n, self.elapsed_time) 
         return self.n / self.elapsed_time
 
     @property
@@ -155,7 +156,7 @@ class TimeMeter(Meter):
 
     @property
     def smoothed_value(self) -> float:
-        print("DEBUG_MESSAGE: Smooth Value Called")
+###        print("DEBUG_MESSAGE: Smooth Value Called")
         val = self.avg
         if self.round is not None and val is not None:
             val = safe_round(val, self.round)
@@ -212,7 +213,7 @@ class StopwatchMeter(Meter):
 
     @property
     def smoothed_value(self) -> float:
-        print("DEBUG_MESSAGE: Meter Key:" , self.avg, self.sum, self.n)
+###        print("DEBUG_MESSAGE: Meter Key:" , self.avg, self.sum, self.n)
         val = self.avg if self.sum > 0 else self.elapsed_time
         if self.round is not None and val is not None:
             val = safe_round(val, self.round)
@@ -260,18 +261,22 @@ class MetersDict(OrderedDict):
     def get_smoothed_value(self, key: str) -> float:
         """Get a single smoothed value."""
         meter = self[key]
-        print("DEBUG_MESSAGE: Meter Key:" , key, meter)
+###        print("DEBUG_MESSAGE: Meter Key:" , key, meter)
+#        metsumm("Before smooth value..")
         if isinstance(meter, MetersDict._DerivedMeter):
-            return meter.fn(self)
+            result =  meter.fn(self)
         else:
-            return meter.smoothed_value
+            result = meter.smoothed_value
+
+#        metsumm("After smooth value..")
+        return result
 
     def get_smoothed_values(self) -> Dict[str, float]:
         """Get all smoothed values."""
         return OrderedDict([
             (key, self.get_smoothed_value(key))
             for key in self.keys()
-            if not key.startswith("_")
+            if not key.startswith("_") and key not in ["gnorm", "clip", "train_wall"]
         ])
 
     def reset(self):

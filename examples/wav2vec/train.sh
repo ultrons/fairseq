@@ -4,11 +4,11 @@ python \
 train.py \
  /home/sivaibhav/fairseq/wav2vec/manifest \
 	 --tpu \
---max-sentences 16 \
+--max-sentences 32 \
 --save-dir /home/sivaibhav/wav2vec/model \
 --num-workers 6 \
 --bf16 \
---max-update 40 \
+--max-update 4 \
 --save-interval 1 \
 --no-epoch-checkpoints \
 --arch wav2vec \
@@ -30,6 +30,7 @@ train.py \
 --max-sample-size 150000 \
 --max-tokens 1500000 \
 --skip-invalid-size-inputs-valid-test \
---log-interval 4 \
+--log-interval 20 \
 --log-format simple \
+--clip-norm 0
 
