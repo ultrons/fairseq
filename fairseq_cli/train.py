@@ -203,23 +203,23 @@ def train(args, trainer, task, epoch_itr, max_update=math.inf):
 
     valid_subsets = args.valid_subset.split(',')
     for samples in progress:
-        #print("DEBUG_MESSAGE:", len(samples))
+##        #print("DEBUG_MESSAGE:", len(samples))
         #for i in samples:
         #    print(i['net_input']['source'].size())
         #continue
         with metrics.aggregate('train_inner'):
-            metsumm("DEBUG_MESSAGE: Before Main Train Step.")
+##            metsumm("DEBUG_MESSAGE: Before Main Train Step.")
             log_output = trainer.train_step(samples)
-            metsumm("DEBUG_MESSAGE: After Main Train Step.")
+##            metsumm("DEBUG_MESSAGE: After Main Train Step.")
             if log_output is None:  # OOM, overflow, ...
                 continue
 
         # log mid-epoch stats
         num_updates = trainer.get_num_updates()
         if num_updates % args.log_interval == 0:
-            metsumm("DEBUG_MESSAGE: Before Get Training Stat")
+           # metsumm("DEBUG_MESSAGE: Before Get Training Stat")
             stats = get_training_stats(metrics.get_smoothed_values('train_inner'))
-            metsumm("DEBUG_MESSAGE: After Get Training Stat")
+           # metsumm("DEBUG_MESSAGE: After Get Training Stat")
             progress.log(stats, tag='train_inner', step=num_updates)
 
             # reset mid-epoch stats after each log interval
@@ -227,11 +227,11 @@ def train(args, trainer, task, epoch_itr, max_update=math.inf):
             metrics.reset_meters('train_inner')
 
         end_of_epoch = not itr.has_next()
-        metsumm("DEBUG_MESSAGE: Before Valid Losses Computation:")
+##        metsumm("DEBUG_MESSAGE: Before Valid Losses Computation:")
         valid_losses = validate_and_save(
             args, trainer, task, epoch_itr, valid_subsets, end_of_epoch
         )
-        metsumm("DEBUG_MESSAGE: After Valid Losses Computation:")
+##        metsumm("DEBUG_MESSAGE: After Valid Losses Computation:")
 
         if should_stop_early(args, valid_losses[0]) or num_updates >= max_update:
             break
@@ -387,7 +387,7 @@ def cli_main(modify_parser=None):
             xmp.spawn(
                 fn=distributed_main,
                 args=(args, ),
-                nprocs=1,  # use all 8 TPU cores
+                nprocs=8,  # use all 8 TPU cores
             )
     else:
         # single GPU training

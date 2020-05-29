@@ -4,12 +4,12 @@ python \
 train.py \
  /home/sivaibhav/fairseq/wav2vec/manifest \
 	 --tpu \
---max-sentences 32 \
+	 --distributed-world-size 8 \
 --save-dir /home/sivaibhav/wav2vec/model \
 --num-workers 6 \
 --bf16 \
---max-update 4 \
---save-interval 1 \
+--max-epoch 2 \
+--max-sentences 16 \
 --no-epoch-checkpoints \
 --arch wav2vec \
 --task audio_pretraining \
@@ -32,5 +32,8 @@ train.py \
 --skip-invalid-size-inputs-valid-test \
 --log-interval 20 \
 --log-format simple \
---clip-norm 0
+--clip-norm 0 \
+--disable-validation \
+--no-save
+
 
