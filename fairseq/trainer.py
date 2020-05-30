@@ -522,7 +522,6 @@ class Trainer(object):
             if self.tpu:
                 # mark step on TPUs
                 import torch_xla.core.xla_model as xm
-                xm.mark_step()
 
                 # only log stats every log_interval steps
                 # this causes wps to be misreported when log_interval > 1
@@ -530,8 +529,9 @@ class Trainer(object):
                 self.cumm_sample_size += sample_size
                 logging_output = {}
                 if self.get_num_updates() % self.args.log_interval == 0:
+                    xm.mark_step()
                     # Doing Cross replica reduce first
-                    logging_outputs, (sample_size, ooms) = self._aggregate_logging_outputs(
+                    logging_outputs, (sample_size, _) = self._aggregate_logging_outputs(
                       self.logging_history, self.cumm_sample_size, ooms, ignore=is_dummy_batch,
                     )
                     # then log stats

@@ -58,9 +58,7 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
         else:
             loss = F.binary_cross_entropy_with_logits(logits, target.float(), weights, reduction="sum" if reduce else "none",)
 
-##        metsumm("DEBUG_MESSAGE: Before  target sum long")
-        sample_size = target.numel() if self.infonce else target.sum().long()
-##        metsumm("DEBUG_MESSAGE: After  target sum long")
+        sample_size = target.numel() if self.infonce else target.long().sum()
         #sample_size = target.numel()
         losses.append(loss)
 
@@ -119,10 +117,10 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
 #    @staticmethod
 #    def aggregate_logging_outputs(logging_outputs):
 #        """Aggregate logging outputs from data parallel training."""
-#        loss_sum = utils.item(sum(log.get('loss', 0) for log in logging_outputs))
-#        ntokens = utils.item(sum(log.get('ntokens', 0) for log in logging_outputs))
-#        nsentences = utils.item(sum(log.get('nsentences', 0) for log in logging_outputs))
-#        sample_size = utils.item(sum(log.get('sample_size', 0) for log in logging_outputs))
+#        loss_sum = sum(log.get('loss', 0) for log in logging_outputs)
+#        ntokens = sum(log.get('ntokens', 0) for log in logging_outputs)
+#        nsentences = sum(log.get('nsentences', 0) for log in logging_outputs)
+#        sample_size = sum(log.get('sample_size', 0) for log in logging_outputs)
 #        agg_output = {
 #            'loss': loss_sum / sample_size / math.log(2),
 #            'ntokens': ntokens,
@@ -147,33 +145,16 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
 #                agg_output[k] = val
 #
 #        return agg_output
-    
+   
     @staticmethod
     def reduce_metrics(logging_outputs) -> None:
         """Aggregate logging outputs from data parallel training."""
-##        metsumm("DEBUG_MESSAGE: before loss extract")
-        loss_sum = utils.item(sum(log.get('loss', 0) for log in logging_outputs))
-##        metsumm("DEBUG_MESSAGE: After loss extract")
-        ntokens = utils.item(sum(log.get('ntokens', 0) for log in logging_outputs))
-##        metsumm("DEBUG_MESSAGE: After loss2 extract")
-        nsentences = utils.item(sum(log.get('nsentences', 0) for log in logging_outputs))
-##        metsumm("DEBUG_MESSAGE: After loss3 extract")
-        sample_size = utils.item(sum(log.get('sample_size', 0) for log in logging_outputs))
-##        metsumm("DEBUG_MESSAGE: After loss4 extract")
-        #loss_ = [log['loss'].item()  for log in logging_outputs] # Result in 6X fewer aten:_local_scalar_dense
-        #loss_ = torch.stack([log['loss'] for log in logging_outputs]) # Result in 6X fewer aten:_local_scalar_dense
-        #loss_sum = loss_.sum()
-        #loss_ = [log.get('loss', 0) for log in logging_outputs]
-        #loss_sum = sum(loss_)
-##        metsumm("DEBUG_MESSAGE: After loss extract")
-        #ntokens = sum(log.get('ntokens', 0) for log in logging_outputs)
-        #sample_size = sum(log.get('sample_size', 0) for log in logging_outputs)
-        #scaled_loss = loss_sum /  ntokens / math.log(2)
-##        metsumm("DEBUG_MESSAGE: After scalar compute")
-        #if sample_size != ntokens:
-        #    metrics.log_scalar('nll_loss', loss_sum / ntokens / math.log(2), round=3)
+        loss_sum = sum(log.get('loss', 0) for log in logging_outputs)
+        ntoken = sum(log.get('ntokens', 0) for log in logging_outputs)
+        nsentences = sum(log.get('nsentences', 0) for log in logging_outputs)
+        sample_size = sum(log.get('sample_size', 0) for log in logging_outputs)
         metrics.log_scalar('loss', loss_sum / sample_size / math.log(2), round=3)
-##        metsumm("DEBUG_MESSAGE: After loss scaling")
+
         correct = sum(log.get("correct", 0) for log in logging_outputs)
         total = sum(log.get("count", 0) for log in logging_outputs)
         if total > 0:

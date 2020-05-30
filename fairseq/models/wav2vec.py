@@ -667,7 +667,7 @@ class Wav2VecPredictionsModel(nn.Module):
         for i in range(steps):
             offset = i + self.offset
             end = start + (tsz - offset) * bsz * copies
-            print("DEBUG_MESSAGE", labels.size(), start-end, start,  end, tsz, offset, bsz, copies)
+            #print("DEBUG_MESSAGE", labels.size(), start-end, start,  end, tsz, offset, bsz, copies)
             if self.infonce:
                 predictions[start:end] = torch.einsum(
                     "bct,nbct->tbn", x[..., :-offset, i], targets[..., offset:]
@@ -678,7 +678,7 @@ class Wav2VecPredictionsModel(nn.Module):
                     "bct,nbct->nbt", x[..., :-offset, i], targets[..., offset:]
                 ).flatten()
                 labels[start : start + pos_num] = 1.0
-                print("DEBUG_MESSAGE_GROWTH", labels.sum())
+                #print("DEBUG_MESSAGE_GROWTH", labels.sum())
                 if weights is not None:
                     weights[start : start + pos_num] = 1.0
             start = end
@@ -689,7 +689,7 @@ class Wav2VecPredictionsModel(nn.Module):
         else:
             if weights is not None:
                 labels = (labels, weights)
-        print("DEBUG_MESSAGE", labels.sum())
+        #print("DEBUG_MESSAGE", labels.sum())
         return predictions, labels
 
 
