@@ -44,6 +44,7 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
         net_output = model(**sample['net_input'])
         logits = model.get_logits(net_output).float() #DEB: No incr
         target = model.get_targets(sample, net_output)
+        sample_size = model.get_sample_size(sample, net_output)
 
         weights = None
         if hasattr(model, 'get_target_weights') and not self.infonce:
@@ -58,7 +59,8 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
         else:
             loss = F.binary_cross_entropy_with_logits(logits, target.float(), weights, reduction="sum" if reduce else "none",)
 
-        sample_size = target.numel() if self.infonce else target.long().sum()
+        #sample_size = target.numel() if self.infonce else target.long().sum()
+        #sample_size = target.numel()
         losses.append(loss)
 
         if self.loss_weights is not None and hasattr(model, "get_extra_losses"):

@@ -393,13 +393,8 @@ class FairseqTask(object):
             )
         else:
             ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
-            #ntokens = utils.item(sum(log.get("ntokens", 0) for log in logging_outputs))
-            #ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
-##            metsumm("DEBUG_MESSAGE: After ntoken extraction")
             metrics.log_scalar("wpb", ntokens, priority=180, round=1)
-##            metsumm("DEBUG_MESSAGE: After wpb extraction")
             metrics.log_speed("wps", ntokens, priority=90, round=1)
-##            metsumm("DEBUG_MESSAGE: After wpsntoken extraction")
 
         if not any("nsentences" in log for log in logging_outputs):
             warnings.warn(
