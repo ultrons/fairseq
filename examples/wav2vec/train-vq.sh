@@ -6,7 +6,7 @@ python \
 	 --tpu \
 	 --bf16 \
 	 --distributed-world-size 8 \
---max-sentences 1 \
+--max-sentences 8 \
 --num-workers 6 \
 --max-update 40000 \
 --save-interval 1 \
@@ -23,8 +23,8 @@ python \
 --conv-feature-layers '[(512, 10, 5), (512, 8, 4), (512, 4, 2), (512, 4, 2), (512, 4, 2), (512, 1, 1), (512, 1, 1), (512, 1, 1)]' \
 --conv-aggregator-layers '[(512, 2, 1), (512, 3, 1), (512, 4, 1), (512, 5, 1), (512, 6, 1), (512, 7, 1), (512, 8, 1), (512, 9, 1), (512, 10, 1), (512, 11, 1), (512, 12, 1), (512, 13, 1)]' \
 	--activation gelu --offset auto --skip-connections-agg --residual-scale 0.5 \
-	--log-keys '["prob_perplexity","code_perplexity","temp"]' --vq-type gumbel --vq-groups 2 --vq-depth 2 \
 	--combine-groups --vq-vars 320 --vq-temp '(2,0.5,0.999995)' --prediction-steps 12 --warmup-updates 1000 \
+--log-keys '["code_perplexity", "prob_perplexity","temp"]' --vq-type gumbel --vq-groups 2 --vq-depth 2 \
 --log-compression \
 --warmup-init-lr 1e-07 \
 --criterion binary_cross_entropy \

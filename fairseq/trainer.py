@@ -525,7 +525,7 @@ class Trainer(object):
 
                 # only log stats every log_interval steps
                 # this causes wps to be misreported when log_interval > 1
-                self.logging_history += logging_outputs
+                self.logging_history.extend(logging_outputs)
                 self.cumm_sample_size += sample_size
                 logging_output = {}
                 if self.get_num_updates() % self.args.log_interval == 0:

@@ -158,6 +158,15 @@ class BinaryCrossEntropyCriterion(FairseqCriterion):
         total = sum(log.get("count", 0) for log in logging_outputs)
         if total > 0:
             metrics.log_scalar('accuracy', correct / total, round=3)
+        builtin_keys = {'loss', 'ntokens', 'nsentences', 'sample_size', 'correct', 'count'}
+
+        for k in logging_outputs[0]:
+            if k not in builtin_keys:
+                val = sum(log.get(k, 0) for log in logging_outputs) / len(logging_outputs)
+                if k.startswith('loss'):
+                    val = val / ntokens if ntokens > 0 else float('nan')
+                metrics.log_scalar(k, val, round=3)
+
 
     @staticmethod
     def logging_outputs_can_be_summed() -> bool:
