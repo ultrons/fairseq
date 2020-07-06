@@ -25,6 +25,10 @@ class AudioPretrainingTask(FairseqTask):
                             help='max sample size to crop to for batching. default = min sample length')
         parser.add_argument('--min-sample-size', default=None, type=int,
                             help='min sample size to crop to for batching. default = same as --max-sample-size')
+        parser.add_argument('--num-batch-buckets', default=0, type=int,
+                            help='if >0, then bucket source and target lengths into N '
+                                 'buckets and pad accordingly; this is useful on TPUs '
+                                 'to minimize the number of compilations')
 
     def __init__(self, args):
         super().__init__(args)
@@ -50,6 +54,14 @@ class AudioPretrainingTask(FairseqTask):
                                                  sample_rate=self.args.sample_rate,
                                                  max_sample_size=self.args.max_sample_size,
                                                  min_sample_size=self.args.min_sample_size)
+        from fairseq.data import BucketPadLengthDataset
+        if (self.args.num_batch_buckets > 0): 
+            self.datasets[split] = BucketPadLengthDataset(
+                self.datasets[split],
+                sizes=self.datasets[split].sizes,
+                num_buckets=self.args.num_batch_buckets,
+                pad_idx=0,
+                left_pad=False)
 
     @property
     def target_dictionary(self):

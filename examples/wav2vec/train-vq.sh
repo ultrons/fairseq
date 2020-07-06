@@ -30,7 +30,8 @@ python \
 --criterion binary_cross_entropy \
 --num-negatives 10 \
 --max-sample-size 150000 \
-	--max-tokens 300000 --cross-sample-negatives 0 --update-freq 1 --seed 2 --skip-invalid-size-inputs-valid-test \
+	--max-tokens 450000 --cross-sample-negatives 0 --update-freq 1 --seed 2 --skip-invalid-size-inputs-valid-test \
 --skip-invalid-size-inputs-valid-test \
 --log-interval 20 \
+--num-batch-buckets 3 \
 --log-format simple
