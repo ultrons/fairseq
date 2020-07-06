@@ -2,7 +2,7 @@
 # --tidy --outfile /tmp/debug_run_`date +%d%m%y_%H_%M_%S`.tar.gz -- python -u \
 python \
  train.py \
- /home/sivaibhav/wav2vec/manifest \
+ ${HOME}/wav2vec/manifest \
 	 --tpu \
 	 --bf16 \
 	 --distributed-world-size 8 \
