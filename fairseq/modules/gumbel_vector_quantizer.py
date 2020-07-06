@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import fairseq
 
 class GumbelVectorQuantizer(nn.Module):
     def __init__(
@@ -144,7 +145,7 @@ class GumbelVectorQuantizer(nn.Module):
         result["temp"] = self.curr_temp
 
         if self.training:
-            x = F.gumbel_softmax(x.float(), tau=self.curr_temp, hard=True).type_as(x)
+            x = fairseq.utils.gumbel_softmax(x.float(), tau=self.curr_temp, hard=True).type_as(x)
         else:
             x = hard_x
 
