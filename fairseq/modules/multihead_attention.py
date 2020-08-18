@@ -80,7 +80,7 @@ class MultiheadAttention(nn.Module):
         self.reset_parameters()
 
         self.onnx_trace = False
-        self.tpu = False
+        self.tpu = True
 
     def prepare_for_onnx_export_(self):
         self.onnx_trace = True

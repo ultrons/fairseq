@@ -54,6 +54,7 @@ def safe_round(number, ndigits):
     if hasattr(number, '__round__'):
         return round(number, ndigits)
     elif torch is not None and torch.is_tensor(number) and number.numel() == 1:
+       # return number
         return safe_round(number.item(), ndigits)
     elif np is not None and np.ndim(number) == 0 and hasattr(number, 'item'):
         return safe_round(number.item(), ndigits)
@@ -266,7 +267,8 @@ class MetersDict(OrderedDict):
         return OrderedDict([
             (key, self.get_smoothed_value(key))
             for key in self.keys()
-            if not key.startswith("_")
+            #if not key.startswith("_")
+            if not key.startswith("_") and key not in ["gnorm", "clip", "train_wall"]
         ])
 
     def reset(self):

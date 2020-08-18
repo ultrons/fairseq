@@ -40,7 +40,11 @@ class Wav2vecCriterion(FairseqCriterion):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
+        from fairseq.metsumm import metsumm
+        metsumm("Before forward")
         net_output = model(**sample['net_input'])
+        metsumm("After forward")
+
         logits = model.get_logits(net_output).float()
         target = model.get_targets(sample, net_output)
 
@@ -75,7 +79,8 @@ class Wav2vecCriterion(FairseqCriterion):
                     losses.append(p)
 
         logging_output = {
-            'loss': loss.item() if reduce else loss,
+            #'loss': loss.item() if reduce else loss,
+            'loss': loss,
             'ntokens': sample_size,
             'nsentences': sample['id'].numel(),
             'sample_size': sample_size,
@@ -87,7 +92,7 @@ class Wav2vecCriterion(FairseqCriterion):
 
         if len(losses) > 1:
             for i, l in enumerate(losses):
-                logging_output[f'loss_{i}'] = l.item()
+                logging_output[f'loss_{i}'] = l
 
         if self.infonce:
             with torch.no_grad():
@@ -99,7 +104,8 @@ class Wav2vecCriterion(FairseqCriterion):
                     max = logits.argmax(-1) == 0
                     min = logits.argmin(-1) == 0
                     both = max & min
-                    corr = max.long().sum().item() - both.long().sum().item()
+                    #corr = max.long().sum().item() - both.long().sum().item()
+                    corr = max.long().sum() - both.long().sum()
                     count = max.numel()
 
                 logging_output["correct"] = corr
@@ -113,10 +119,10 @@ class Wav2vecCriterion(FairseqCriterion):
     @staticmethod
     def reduce_metrics(logging_outputs) -> None:
         """Aggregate logging outputs from data parallel training."""
-        loss_sum = utils.item(sum(log.get('loss', 0) for log in logging_outputs))
-        ntokens = utils.item(sum(log.get('ntokens', 0) for log in logging_outputs))
-        nsentences = utils.item(sum(log.get('nsentences', 0) for log in logging_outputs))
-        sample_size = utils.item(sum(log.get('sample_size', 0) for log in logging_outputs))
+        loss_sum = sum(log.get('loss', 0) for log in logging_outputs)
+        ntokens = sum(log.get('ntokens', 0) for log in logging_outputs)
+        nsentences = sum(log.get('nsentences', 0) for log in logging_outputs)
+        sample_size = sum(log.get('sample_size', 0) for log in logging_outputs)
 
         metrics.log_scalar('loss', loss_sum / sample_size / math.log(2), sample_size, round=3)
         metrics.log_scalar('ntokens', ntokens)
@@ -132,7 +138,8 @@ class Wav2vecCriterion(FairseqCriterion):
         if total > 0:
             metrics.log_derived(
                 "accuracy",
-                lambda meters: round(meters["_correct"].sum / meters["_total"].sum, 5)
+                #lambda meters: round(meters["_correct"].sum / meters["_total"].sum, 5)
+                lambda meters: meters["_correct"].sum / meters["_total"].sum
                 if meters["_total"].sum > 0
                 else float("nan"),
             )
@@ -154,4 +161,4 @@ class Wav2vecCriterion(FairseqCriterion):
         across workers prior to calling `reduce_metrics`. Setting this
         to True will improves distributed training speed.
         """
-        return False
+        return True

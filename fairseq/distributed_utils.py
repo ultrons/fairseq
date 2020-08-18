@@ -109,7 +109,7 @@ def distributed_init(args):
         args.distributed_rank = torch.distributed.get_rank()
     else:
         import torch_xla.core.xla_model as xm
-        assert xm.xrt_world_size() == args.distributed_world_size
+        #assert xm.xrt_world_size() == args.distributed_world_size
         args.device_id = xm.get_local_ordinal()
         args.distributed_rank = xm.get_ordinal()
         xm.rendezvous('distributed_init')  # wait for all workers
@@ -182,7 +182,7 @@ def call_main(args, main, **kwargs):
         xmp.spawn(
             fn=distributed_main,
             args=(main, args, kwargs),
-            nprocs=8,  # use all 8 TPU cores
+            nprocs=1,  # use all 8 TPU cores
         )
     else:
         # single GPU main

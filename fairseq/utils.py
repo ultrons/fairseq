@@ -253,6 +253,8 @@ def convert_padding_direction(
 
 def item(tensor):
     if hasattr(tensor, "item"):
+        from fairseq import pdb
+        pdb.set_trace()
         return tensor.item()
     if hasattr(tensor, "__getitem__"):
         return tensor[0]

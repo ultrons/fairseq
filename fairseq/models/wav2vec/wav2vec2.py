@@ -511,14 +511,17 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         logits = torch.cosine_similarity(x.float(), targets.float(), dim=-1).type_as(x)
 
-        logits /= self.logit_temp
+        logits =  logits / self.logit_temp
 
-        if neg_is_pos.any():
+        #if neg_is_pos.any():
+        if False:
             logits[1:][neg_is_pos] = float("-inf")
 
         return logits
 
-    def forward(self, source, padding_mask=None, mask=True, features_only=False):
+    def forward(self, source, padding_mask=None, mask=False, features_only=False):
+        from fairseq import pdb
+        #pdb.set_trace()
 
         if self.feature_grad_mult > 0:
             features = self.feature_extractor(source)
@@ -561,7 +564,11 @@ class Wav2Vec2Model(BaseFairseqModel):
             curr_temp = q["temp"]
             features = self.project_inp(features)
 
-        if mask:
+        from fairseq.metsumm import metsumm
+        metsumm("Before mask...")
+
+        #if mask:
+        if False:
             x, mask_indices = self.apply_mask(features, padding_mask)
             if mask_indices is not None:
                 y = unmasked_features[mask_indices].view(unmasked_features.size(0), -1, unmasked_features.size(-1))
@@ -571,12 +578,14 @@ class Wav2Vec2Model(BaseFairseqModel):
             x = features
             y = unmasked_features
             mask_indices = None
+        metsumm("After mask...")
 
         x = self.encoder(x, padding_mask=padding_mask)
 
         if features_only:
             return {"x": x, "padding_mask": padding_mask}
 
+        metsumm("Before quantizer...")
         if self.quantizer:
             q = self.quantizer(y, produce_targets=False)
             y = q["x"]
@@ -613,18 +622,27 @@ class Wav2Vec2Model(BaseFairseqModel):
             else:
                 negs, _ = self.sample_negatives(y, y.size(1))
 
-        x = x[mask_indices].view(x.size(0), -1, x.size(-1))
+        metsumm("After quantizer...")
+        #x = x[mask_indices].view(x.size(0), -1, x.size(-1))
+        x = x.view(x.size(0), -1, x.size(-1))
 
+        metsumm("Before Negs ...")
         if self.target_glu:
             y = self.target_glu(y)
             negs = self.target_glu(negs)
+        metsumm("After Negs ...")
 
+        metsumm("Before final-project ...")
         x = self.final_proj(x)
+        metsumm("After final-project ...")
+        metsumm("Before compute-pred ...")
         x = self.compute_preds(x, y, negs)
+        metsumm("After compute-pred ...")
 
         result = {"x": x, "padding_mask": padding_mask, "features_pen": features_pen}
 
-        if prob_ppl is not None:
+        #if prob_ppl is not None:
+        if True:
             result["prob_perplexity"] = prob_ppl
             result["code_perplexity"] = code_ppl
             result["num_vars"] = num_vars
@@ -811,7 +829,7 @@ class TransformerEncoder(nn.Module):
 
         x_conv = self.pos_conv(x.transpose(1, 2))
         x_conv = x_conv.transpose(1, 2)
-        x += x_conv
+        x =  x + x_conv
 
         if not self.layer_norm_first:
             x = self.layer_norm(x)
@@ -952,7 +970,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
 def base_architecture(args):
     args.extractor_mode = getattr(args, "extractor_mode", "default")
 
-    args.encoder_layers = getattr(args, "encoder_layers", 12)
+    args.encoder_layers = getattr(args, "encoder_layers", 6)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 768)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 3072)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 12)

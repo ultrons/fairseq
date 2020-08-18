@@ -176,6 +176,15 @@ class FileAudioDataset(RawAudioDataset):
 
         fname = os.path.join(self.root_dir, self.fnames[index])
         wav, curr_sample_rate = sf.read(fname)
-        feats = torch.from_numpy(wav).float()
+        s = wav.shape[0]
+        wav_pad = np.zeros((250000,))
+        if s <= 250000: 
+            wav_pad[:s] = wav
+        else:
+            wav_pad = wav[:250000]
+
+        #feats = torch.from_numpy(wav).float()
+        feats = torch.from_numpy(wav_pad).float()
         feats = self.postprocess(feats, curr_sample_rate)
+
         return {"id": index, "source": feats}
