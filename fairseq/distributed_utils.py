@@ -109,10 +109,6 @@ def distributed_init(args):
         args.distributed_rank = torch.distributed.get_rank()
     else:
         import torch_xla.core.xla_model as xm
-<<<<<<< Updated upstream
-        #print("DEBUG_INFO:", xm.xrt_world_size(), args.distributed_world_size)
-=======
->>>>>>> Stashed changes
         #assert xm.xrt_world_size() == args.distributed_world_size
         args.device_id = xm.get_local_ordinal()
         args.distributed_rank = xm.get_ordinal()
