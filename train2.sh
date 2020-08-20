@@ -1,16 +1,14 @@
 TAG=$1
-#/usr/share/torch-xla-nightly/pytorch/xla/scripts/debug_run.py \
-# --tidy --outfile /tmp/debug_run_${TAG}_`date +%d%m%y_%H_%M_%S`.tar.gz -- python -u \
-python \
+/usr/share/torch-xla-nightly/pytorch/xla/scripts/debug_run.py \
+ --tidy --outfile /tmp/debug_run_${TAG}_`date +%d%m%y_%H_%M_%S`.tar.gz -- python -u \
  train.py \
  /home/sivaibhav/wav2vec/manifest \
  --tpu \
-	 --distributed-world-size 8 \
+	 --distributed-world-size 1 \
 --max-update 500 \
 --log-interval 1 \
 --encoder-layers $1 \
 --batch-shapes '[(8, 250000)]' \
---max-sentences 8 \
 --num-workers 8 \
 --task audio_pretraining \
 --criterion wav2vec \

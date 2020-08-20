@@ -102,9 +102,6 @@ class AudioPretrainingTask(FairseqTask):
         """
         return cls(args)
 
-    def get_batch_shapes(self):
-        return eval(args.batch_shapes)
-        #return [(8,250000)]
 
     def load_dataset(self, split, **kwargs):
         """Load a given dataset split.
