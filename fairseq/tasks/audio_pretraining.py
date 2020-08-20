@@ -109,9 +109,8 @@ class AudioPretrainingTask(FairseqTask):
             pad=self.args.labels is not None or self.args.enable_padding,
             normalize=self.args.normalize,
         )
-        print("UNBUCKETED_SIZES: ", self.datasets[split].sizes)
         from fairseq.data import BucketPadLengthDataset
-        if (self.args.num_batch_buckets < 0): 
+        if (self.args.num_batch_buckets > 0): 
             self.datasets[split] = BucketPadLengthDataset(
                 self.datasets[split],
                 sizes=self.datasets[split].sizes,

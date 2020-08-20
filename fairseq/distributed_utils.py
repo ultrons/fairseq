@@ -109,7 +109,7 @@ def distributed_init(args):
         args.distributed_rank = torch.distributed.get_rank()
     else:
         import torch_xla.core.xla_model as xm
-        #assert xm.xrt_world_size() == args.distributed_world_size
+        assert xm.xrt_world_size() == args.distributed_world_size
         args.device_id = xm.get_local_ordinal()
         args.distributed_rank = xm.get_ordinal()
         xm.rendezvous('distributed_init')  # wait for all workers

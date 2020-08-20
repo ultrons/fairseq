@@ -40,6 +40,8 @@ class Trainer(object):
     def __init__(self, args, task, model, criterion, quantizer=None):
         self.args = args
         self.task = task
+        self.logging_history = []
+        self.cumm_sample_size = 0
 
         # catalog shared parameters
         shared_params = _catalog_shared_params(model)
@@ -423,9 +425,6 @@ class Trainer(object):
             try:
                 with maybe_no_sync():
                     # forward and backward
-                    metsumm("Before task.train_step")
-                    from fairseq import pdb
-                    #pdb.set_trace()
                     loss, sample_size_i, logging_output = self.task.train_step(
                         sample=sample,
                         model=self.model,
@@ -434,7 +433,6 @@ class Trainer(object):
                         update_num=self.get_num_updates(),
                         ignore_grad=is_dummy_batch,
                     )
-                    metsumm("After task.train_step")
                     del loss
 
                 logging_outputs.append(logging_output)
@@ -482,7 +480,7 @@ class Trainer(object):
             sample_size = float(sample_size)
 
         # gather logging outputs from all replicas
-        if self._sync_stats():
+        if self._sync_stats() and not self.tpu:
             train_time = self._local_cumulative_training_time()
             logging_outputs, (sample_size, ooms, total_train_time) = self._aggregate_logging_outputs(
                 logging_outputs, sample_size, ooms, train_time, ignore=is_dummy_batch,
@@ -496,7 +494,6 @@ class Trainer(object):
                 gradients = xm._fetch_gradients(self.optimizer.optimizer)
                 xm.all_reduce('sum', gradients, scale=1.0 / self.data_parallel_world_size)
 
-            metsumm("Before Autograd-profiler-record")
             with torch.autograd.profiler.record_function("multiply-grads"):
                 # multiply gradients by (# GPUs / sample_size) since DDP
                 # already normalizes by the number of GPUs. Thus we get
@@ -510,7 +507,6 @@ class Trainer(object):
             with torch.autograd.profiler.record_function("clip-grads"):
                 # clip grads
                 grad_norm = self.clip_grad_norm(self.args.clip_norm)
-            metsumm("After Autograd-profiler-record")
 
             # check that grad norms are consistent across workers
             if (
@@ -520,11 +516,9 @@ class Trainer(object):
             ):
                 self._check_grad_norms(grad_norm)
 
-            metsumm("Before Optimizer-Step")
             with torch.autograd.profiler.record_function("optimizer"):
                 # take an optimization step
                 self.optimizer.step()
-            metsumm("After Optimizer-Step")
         except FloatingPointError:
             # re-run the forward and backward pass with hooks attached to print
             # out where it fails
@@ -546,33 +540,36 @@ class Trainer(object):
             raise e
 
         # Some distributed wrappers (e.g., SlowMo) need access to the optimizer after the step
-        metsumm("Before Additional-Optimizer-Step")
         if hasattr(self.model, 'perform_additional_optimizer_actions'):
             if hasattr(self.optimizer, 'fp32_params'):
                 self.model.perform_additional_optimizer_actions(self.optimizer.optimizer, self.optimizer.fp32_params)
             else:
                 self.model.perform_additional_optimizer_actions(self.optimizer.optimizer)
-        metsumm("After Additional-Optimizer-Step")
 
         if not overflow or self.args.distributed_wrapper == 'SlowMo':
             self.set_num_updates(self.get_num_updates() + 1)
 
             if self.tpu:
                 # mark step on TPUs
+                import torch_xla.core.xla_model as xm
 
                 # only log stats every log_interval steps
                 # this causes wps to be misreported when log_interval > 1
+                self.logging_history.extend(logging_outputs)
+                self.cumm_sample_size += sample_size
                 logging_output = {}
-                metsumm("Before reduce-log-stat")
                 if self.get_num_updates() % self.args.log_interval == 0:
-                    metsumm("Before mark-step")
                     import torch_xla.core.xla_model as xm
                     xm.mark_step()
-                    metsumm("After mark-step")
+                    # Doing Cross replica reduce first
+                    logging_outputs, (sample_size, _) = self._aggregate_logging_outputs(
+                      self.logging_history, self.cumm_sample_size, ooms, ignore=is_dummy_batch,
+                    )
                     logging_output = self._reduce_and_log_stats(
                         logging_outputs, sample_size, grad_norm,
                     )
-                metsumm("After reduce-log-stat")
+                    self.logging_history = []
+                    self.cumm_sample_size = 0
 
                 # log whenever there's an XLA compilation, since these
                 # slow down training and may indicate opportunities for
@@ -839,8 +836,7 @@ class Trainer(object):
         suitable when logging outputs are complex types.
         """
         if self.tpu:
-            #raise NotImplementedError
-            return logging_outputs, extra_stats_to_sum
+            raise NotImplementedError
         if ignore:
             logging_outputs = []
         results = list(zip(
