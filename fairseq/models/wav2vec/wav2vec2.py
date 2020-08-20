@@ -519,7 +519,7 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         return logits
 
-    def forward(self, source, padding_mask=None, mask=True, features_only=False):
+    def forward(self, source, padding_mask=None, mask=False, features_only=False):
         from fairseq import pdb
         #pdb.set_trace()
 

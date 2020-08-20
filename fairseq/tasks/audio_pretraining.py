@@ -31,10 +31,19 @@ class AudioPretrainingTask(FairseqTask):
     @staticmethod
     def add_args(parser):
         """Add task-specific arguments to the parser."""
-        parser.add_argument('--num-batch-buckets', default=0, type=int,
-                            help='if >0, then bucket source and target lengths into N '
-                                 'buckets and pad accordingly; this is useful on TPUs '
-                                 'to minimize the number of compilations')
+        parser.add_argument(
+                '--num-batch-buckets', default=0, type=int, 
+                help='if >0, then bucket source and target lengths into N '
+                'buckets and pad accordingly; this is useful on TPUs '
+                'to minimize the number of compilations'
+                )
+        parser.add_argument('--batch-shapes',
+                type=str,
+                metavar="EXPR",
+                help="Batch Shapes..[(batch-size, sequence-length)]"
+                )
+                                
+
 
         parser.add_argument("data", help="path to data directory")
         parser.add_argument(
@@ -92,6 +101,10 @@ class AudioPretrainingTask(FairseqTask):
             args (argparse.Namespace): parsed command-line arguments
         """
         return cls(args)
+
+    def get_batch_shapes(self):
+        return eval(args.batch_shapes)
+        #return [(8,250000)]
 
     def load_dataset(self, split, **kwargs):
         """Load a given dataset split.

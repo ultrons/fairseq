@@ -5,11 +5,11 @@ python \
  train.py \
  /home/sivaibhav/wav2vec/manifest \
  --tpu \
-	 --distributed-world-size 1 \
+	 --distributed-world-size 8 \
 --max-update 500 \
 --log-interval 1 \
 --encoder-layers $1 \
---num-batch-buckets 3 \
+--batch-shapes '[(8, 250000)]' \
 --max-sentences 8 \
 --num-workers 8 \
 --task audio_pretraining \
