@@ -519,7 +519,7 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         return logits
 
-    def forward(self, source, padding_mask=None, mask=False, features_only=False):
+    def forward(self, source, padding_mask=None, mask=True, features_only=False):
         from fairseq import pdb
         #pdb.set_trace()
 
@@ -970,7 +970,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
 def base_architecture(args):
     args.extractor_mode = getattr(args, "extractor_mode", "default")
 
-    args.encoder_layers = getattr(args, "encoder_layers", 6)
+    args.encoder_layers = getattr(args, "encoder_layers", 12)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 768)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 3072)
     args.encoder_attention_heads = getattr(args, "encoder_attention_heads", 12)

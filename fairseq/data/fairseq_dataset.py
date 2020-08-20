@@ -77,7 +77,7 @@ class FairseqDataset(torch.utils.data.Dataset, EpochListening):
         to restrict batch shapes. This is useful on TPUs to avoid too many
         dynamic shapes (and recompilations).
         """
-        return None
+        return [(8,250000)]
 
     def batch_by_size(
         self,

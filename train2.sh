@@ -1,11 +1,14 @@
-/usr/share/torch-xla-nightly/pytorch/xla/scripts/debug_run.py \
- --tidy --outfile /tmp/debug_run_`date +%d%m%y_%H_%M_%S`.tar.gz -- python -u \
+TAG=$1
+#/usr/share/torch-xla-nightly/pytorch/xla/scripts/debug_run.py \
+# --tidy --outfile /tmp/debug_run_${TAG}_`date +%d%m%y_%H_%M_%S`.tar.gz -- python -u \
+python \
  train.py \
  /home/sivaibhav/wav2vec/manifest \
  --tpu \
 	 --distributed-world-size 1 \
 --max-update 500 \
 --log-interval 1 \
+--encoder-layers $1 \
 --num-batch-buckets 3 \
 --max-sentences 8 \
 --num-workers 8 \
