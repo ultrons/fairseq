@@ -118,8 +118,6 @@ class Wav2vecCriterion(FairseqCriterion):
 
     @staticmethod
     def reduce_metrics(logging_outputs) -> None:
-        from fairseq import pdb
-        pdb.set_trace()
         """Aggregate logging outputs from data parallel training."""
         loss_sum = sum(log.get('loss', 0) for log in logging_outputs)
         ntokens = sum(log.get('ntokens', 0) for log in logging_outputs)
@@ -157,7 +155,6 @@ class Wav2vecCriterion(FairseqCriterion):
                     metrics.log_scalar(k, scaled_loss)
                 else:
                     metrics.log_scalar(k, val)
-        pdb.set_trace()
 
     @staticmethod
     def logging_outputs_can_be_summed() -> bool:
