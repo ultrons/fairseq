@@ -118,13 +118,16 @@ class Wav2vecCriterion(FairseqCriterion):
 
     @staticmethod
     def reduce_metrics(logging_outputs) -> None:
+        from fairseq import pdb
+        pdb.set_trace()
         """Aggregate logging outputs from data parallel training."""
         loss_sum = sum(log.get('loss', 0) for log in logging_outputs)
         ntokens = sum(log.get('ntokens', 0) for log in logging_outputs)
         nsentences = sum(log.get('nsentences', 0) for log in logging_outputs)
         sample_size = sum(log.get('sample_size', 0) for log in logging_outputs)
 
-        metrics.log_scalar('loss', loss_sum / sample_size / math.log(2), sample_size, round=3)
+        scaled_loss = loss_sum / sample_size / math.log(2)
+        metrics.log_scalar('loss', scaled_loss, round=3)
         metrics.log_scalar('ntokens', ntokens)
         metrics.log_scalar('nsentences', nsentences)
 
@@ -150,9 +153,11 @@ class Wav2vecCriterion(FairseqCriterion):
             if k not in builtin_keys:
                 val = sum(log.get(k, 0) for log in logging_outputs) / len(logging_outputs)
                 if k.startswith('loss'):
-                    metrics.log_scalar(k, val / sample_size / math.log(2), sample_size)
+                    scaled_loss = val / sample_size / math.log(2)
+                    metrics.log_scalar(k, scaled_loss)
                 else:
-                    metrics.log_scalar(k, val, round=3)
+                    metrics.log_scalar(k, val)
+        pdb.set_trace()
 
     @staticmethod
     def logging_outputs_can_be_summed() -> bool:

@@ -6,7 +6,7 @@ python \
  /home/sivaibhav/wav2vec/manifest \
  --tpu \
 	 --distributed-world-size 1 \
---max-update 500 \
+--max-update 10 \
 --log-interval 1 \
 --encoder-layers $1 \
 --num-workers 6 \
