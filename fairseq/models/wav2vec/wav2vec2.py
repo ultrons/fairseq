@@ -521,7 +521,6 @@ class Wav2Vec2Model(BaseFairseqModel):
 
     def forward(self, source, padding_mask=None, mask=False, features_only=False):
         from fairseq import pdb
-        #pdb.set_trace()
 
         if self.feature_grad_mult > 0:
             features = self.feature_extractor(source)

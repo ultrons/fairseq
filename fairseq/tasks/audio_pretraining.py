@@ -118,15 +118,9 @@ class AudioPretrainingTask(FairseqTask):
             min_length=self.args.min_sample_size,
             pad=self.args.labels is not None or self.args.enable_padding,
             normalize=self.args.normalize,
+            batch_shapes=self.args.batch_shapes,
+            num_batch_buckets=self.args.num_batch_buckets
         )
-        from fairseq.data import BucketPadLengthDataset
-        if (self.args.num_batch_buckets > 0): 
-            self.datasets[split] = BucketPadLengthDataset(
-                self.datasets[split],
-                sizes=self.datasets[split].sizes,
-                num_buckets=self.args.num_batch_buckets,
-                pad_idx=0,
-                left_pad=False)
 
         if self.args.labels:
             dict_path = os.path.join(self.args.data, f"dict.{self.args.labels}.txt")

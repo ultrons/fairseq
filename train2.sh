@@ -5,8 +5,10 @@ python \
  train.py \
  /home/sivaibhav/wav2vec/manifest \
  --tpu \
-	 --distributed-world-size 1 \
---max-update 10 \
+	 --distributed-world-size 8 \
+--max-update 4000 \
+--batch-shapes '[(8, 250000)]' \
+--enable-padding \
 --log-interval 1 \
 --encoder-layers $1 \
 --num-workers 6 \

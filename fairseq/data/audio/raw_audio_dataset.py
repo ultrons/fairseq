@@ -25,7 +25,7 @@ class RawAudioDataset(FairseqDataset):
         min_sample_size=None,
         shuffle=True,
         min_length=0,
-        pad=False,
+        pad=True,
         normalize=False,
     ):
         super().__init__()
@@ -40,6 +40,7 @@ class RawAudioDataset(FairseqDataset):
         self.pad = pad
         self.shuffle = shuffle
         self.normalize = normalize
+
 
     def __getitem__(self, index):
         raise NotImplementedError()
@@ -72,6 +73,7 @@ class RawAudioDataset(FairseqDataset):
         return wav[start:end]
 
     def collater(self, samples):
+        from fairseq import pdb
         samples = [
             s
             for s in samples
@@ -82,9 +84,10 @@ class RawAudioDataset(FairseqDataset):
 
         sources = [s["source"] for s in samples]
         sizes = [len(s) for s in sources]
+        padded_sizes = [s["padded_size"] for s in samples]
 
         if self.pad:
-            target_size = min(max(sizes), self.max_sample_size)
+            target_size = min(max(padded_sizes), self.max_sample_size)
         else:
             target_size = min(min(sizes), self.max_sample_size)
 
@@ -144,6 +147,8 @@ class FileAudioDataset(RawAudioDataset):
         min_length=0,
         pad=False,
         normalize=False,
+        batch_shapes=None,
+        num_batch_buckets=0
     ):
         super().__init__(
             sample_rate=sample_rate,
@@ -154,7 +159,14 @@ class FileAudioDataset(RawAudioDataset):
             pad=pad,
             normalize=normalize,
         )
-
+        
+        self.num_batch_buckets = num_batch_buckets
+        self.batch_shapes = eval(batch_shapes) if batch_shapes is not None else batch_shapes
+        self.padded_sizes = None
+        if batch_shapes:
+            self.padded_sizes = []
+            self._fixed_lengths = np.array([l for (batch,l) in self.batch_shapes])
+       
         self.fnames = []
 
         skipped = 0
@@ -169,25 +181,42 @@ class FileAudioDataset(RawAudioDataset):
                     continue
                 self.fnames.append(items[0])
                 self.sizes.append(sz)
+                if self.batch_shapes:
+                    self.padded_sizes.append(self._fixed_lengths[np.abs(self._fixed_lengths-sz).argmin()])
+
+
         logger.info(f"loaded {len(self.fnames)}, skipped {skipped} samples")
 
+
     def get_batch_shapes(self):
-        return [(8, 250000)]
+        return self.batch_shapes
 
     def __getitem__(self, index):
         import soundfile as sf
 
         fname = os.path.join(self.root_dir, self.fnames[index])
         wav, curr_sample_rate = sf.read(fname)
-        s = wav.shape[0]
-        wav_pad = np.zeros((250000,))
-        if s <= 250000: 
-            wav_pad[:s] = wav
-        else:
-            wav_pad = wav[:250000]
 
-        #feats = torch.from_numpy(wav).float()
-        feats = torch.from_numpy(wav_pad).float()
+        s = wav.shape[0]
+        #wav_pad = np.zeros((250000,))
+        #if s <= 250000: 
+        #    wav_pad[:s] = wav
+        #else:
+        #    wav_pad = wav[:250000]
+
+        if self.padded_sizes:
+            psz = self.padded_sizes[index]
+        else:
+            psz = self.sizes[index] 
+
+        if self.batch_shapes is not None and wav.shape > psz: 
+            wav = wav[:psz]
+        feats = torch.from_numpy(wav).float()
+        #feats = torch.from_numpy(wav_pad).float()
         feats = self.postprocess(feats, curr_sample_rate)
 
-        return {"id": index, "source": feats}
+        return {
+                "id": index,
+                "padded_size": psz,
+                "source": feats
+                }
