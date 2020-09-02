@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F
 
 from .. import FairseqDataset
+from fairseq.data.data_utils import compute_mask_indices
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,9 @@ class RawAudioDataset(FairseqDataset):
         min_sample_size=None,
         shuffle=True,
         min_length=0,
+        # debug-tpu
         pad=True,
+        # pad=False,
         normalize=False,
     ):
         super().__init__()
@@ -40,7 +43,6 @@ class RawAudioDataset(FairseqDataset):
         self.pad = pad
         self.shuffle = shuffle
         self.normalize = normalize
-
 
     def __getitem__(self, index):
         raise NotImplementedError()
@@ -73,7 +75,9 @@ class RawAudioDataset(FairseqDataset):
         return wav[start:end]
 
     def collater(self, samples):
-        from fairseq import pdb
+        # print(f"DEBUG_MESSAGE: data collater called: len(samples) = {len(samples)}")
+        # raise RuntimeError("get trace")
+        # from fairseq import pdb; pdb.set_trace()
         samples = [
             s
             for s in samples
@@ -84,14 +88,19 @@ class RawAudioDataset(FairseqDataset):
 
         sources = [s["source"] for s in samples]
         sizes = [len(s) for s in sources]
+        # debug-tpu
         padded_sizes = [s["padded_size"] for s in samples]
 
         if self.pad:
+            # debug-tpu
             target_size = min(max(padded_sizes), self.max_sample_size)
+            # target_size = min(max(sizes), self.max_sample_size)
         else:
             target_size = min(min(sizes), self.max_sample_size)
 
+        # debug-tpu
         collated_sources = sources[0].new(len(sources), target_size)
+        # collated_sources = sources[0].new_zeros(len(sources), target_size)
         padding_mask = (
             torch.BoolTensor(collated_sources.shape).fill_(False) if self.pad else None
         )
@@ -111,6 +120,44 @@ class RawAudioDataset(FairseqDataset):
         input = {"source": collated_sources}
         if self.pad:
             input["padding_mask"] = padding_mask
+        
+        # debug-tpu
+        # if False:
+        if True:
+            # replace with static mask and re-test
+            # it's also possible that TPU hates different number of "TRUE" in masking
+            # also wps without masking is not a good metric, because the way it's computed.
+            # compute mask indices here at data collater instead of model forward path
+            # DEBUG_MESSAGE: masking params B = 1, T = 781, C = 768, padding_mask = torch.Size([1, 781])
+            # DEBUG_MESSAGE: masking params mask_indices.shape = (1, 781)
+            B, T = len(sources), 781
+            mask_prob = 0.65
+            mask_length = 10
+            mask_selection = "static"
+            mask_other = 0
+            no_mask_overlap = False
+            mask_min_space = 1
+            feature_padding_mask = None
+            if padding_mask is not None:
+                extra = padding_mask.size(1) % T
+                if extra > 0:
+                    feature_padding_mask = padding_mask[:, :-extra]
+                feature_padding_mask = feature_padding_mask.view(feature_padding_mask.size(0), T, -1)
+                feature_padding_mask = feature_padding_mask.all(-1)
+
+            mask_indices = compute_mask_indices(
+                (B, T),
+                feature_padding_mask,
+                mask_prob,
+                mask_length,
+                mask_selection,
+                mask_other,
+                min_masks=2,
+                no_overlap=no_mask_overlap,
+                min_space=mask_min_space,
+            )
+            # print(f"DEBUG_MESSAGE: data collater called: collated_sources.size() = {collated_sources.size()}, B = {B}, T = {T}, padding_mask.size() = {padding_mask.size()}, mask_indices.shape = {mask_indices.shape}")
+            input["mask_indices"] = mask_indices
         return {"id": torch.LongTensor([s["id"] for s in samples]), "net_input": input}
 
     def num_tokens(self, index):
@@ -147,6 +194,7 @@ class FileAudioDataset(RawAudioDataset):
         min_length=0,
         pad=False,
         normalize=False,
+        # debug-tpu
         batch_shapes=None,
         num_batch_buckets=0
     ):
@@ -159,7 +207,7 @@ class FileAudioDataset(RawAudioDataset):
             pad=pad,
             normalize=normalize,
         )
-        
+        # debug-tpu
         self.num_batch_buckets = num_batch_buckets
         self.batch_shapes = eval(batch_shapes) if batch_shapes is not None else batch_shapes
         self.padded_sizes = None
@@ -181,13 +229,14 @@ class FileAudioDataset(RawAudioDataset):
                     continue
                 self.fnames.append(items[0])
                 self.sizes.append(sz)
+                # debug-tpu
                 if self.batch_shapes:
                     self.padded_sizes.append(self._fixed_lengths[np.abs(self._fixed_lengths-sz).argmin()])
 
 
         logger.info(f"loaded {len(self.fnames)}, skipped {skipped} samples")
 
-
+    # debug-tpu
     def get_batch_shapes(self):
         return self.batch_shapes
 
@@ -204,6 +253,7 @@ class FileAudioDataset(RawAudioDataset):
         #else:
         #    wav_pad = wav[:250000]
 
+        # debug-tpu
         if self.padded_sizes:
             psz = self.padded_sizes[index]
         else:
@@ -217,6 +267,7 @@ class FileAudioDataset(RawAudioDataset):
 
         return {
                 "id": index,
+                # debug-tpu
                 "padded_size": psz,
                 "source": feats
                 }

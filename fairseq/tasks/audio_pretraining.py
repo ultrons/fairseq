@@ -114,10 +114,14 @@ class AudioPretrainingTask(FairseqTask):
             manifest,
             sample_rate=self.args.sample_rate,
             max_sample_size=self.args.max_sample_size,
+            # debug-tpu
             min_sample_size=self.args.min_sample_size if not self.args.no_min_cropping else self.args.max_sample_size,
+            # min_sample_size=self.args.max_sample_size,
+
             min_length=self.args.min_sample_size,
             pad=self.args.labels is not None or self.args.enable_padding,
             normalize=self.args.normalize,
+            # debug-tpu
             batch_shapes=self.args.batch_shapes,
             num_batch_buckets=self.args.num_batch_buckets
         )
@@ -156,3 +160,14 @@ class AudioPretrainingTask(FairseqTask):
     def max_positions(self):
         """Maximum input length supported by the encoder."""
         return (sys.maxsize, sys.maxsize)
+
+    # debug-tpu-delete
+    # def filter_indices_by_size(
+    #     self,
+    #     indices,
+    #     dataset,
+    #     max_positions=None,
+    #     ignore_invalid_inputs=False,
+    # ):
+    #     # we do not need to filter by size in this task as dataloaders take care of this
+    #     return indices

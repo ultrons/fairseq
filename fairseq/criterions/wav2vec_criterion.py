@@ -11,6 +11,8 @@ import torch.nn.functional as F
 from fairseq import metrics, utils
 from fairseq.criterions import FairseqCriterion, register_criterion
 
+# debug-tpu-delete
+from fairseq.logging.meters import safe_round
 
 @register_criterion('wav2vec')
 class Wav2vecCriterion(FairseqCriterion):
@@ -62,7 +64,9 @@ class Wav2vecCriterion(FairseqCriterion):
             loss = F.binary_cross_entropy_with_logits(logits, target.float(), weights, reduction="sum" if reduce else "none",)
 
         sample_size = target.numel() if self.infonce else target.long().sum().item()
+        # debug-tpu
         losses.append(loss)
+        # losses.append(loss.detach().clone())        
 
         if self.loss_weights is not None:
             assert hasattr(model, "get_extra_losses")
@@ -79,8 +83,9 @@ class Wav2vecCriterion(FairseqCriterion):
                     losses.append(p)
 
         logging_output = {
-            #'loss': loss.item() if reduce else loss,
+            # debug-tpu
             'loss': loss,
+            # 'loss': loss.item() if reduce else loss,
             'ntokens': sample_size,
             'nsentences': sample['id'].numel(),
             'sample_size': sample_size,
@@ -92,7 +97,9 @@ class Wav2vecCriterion(FairseqCriterion):
 
         if len(losses) > 1:
             for i, l in enumerate(losses):
+                # debug-tpu
                 logging_output[f'loss_{i}'] = l
+                # logging_output[f'loss_{i}'] = l.item()
 
         if self.infonce:
             with torch.no_grad():
@@ -104,8 +111,9 @@ class Wav2vecCriterion(FairseqCriterion):
                     max = logits.argmax(-1) == 0
                     min = logits.argmin(-1) == 0
                     both = max & min
-                    #corr = max.long().sum().item() - both.long().sum().item()
+                    # debug-tpu
                     corr = max.long().sum() - both.long().sum()
+                    # corr = max.long().sum().item() - both.long().sum().item()                    
                     count = max.numel()
 
                 logging_output["correct"] = corr
@@ -119,6 +127,7 @@ class Wav2vecCriterion(FairseqCriterion):
     @staticmethod
     def reduce_metrics(logging_outputs) -> None:
         """Aggregate logging outputs from data parallel training."""
+        # debug-tpu
         loss_sum = sum(log.get('loss', 0) for log in logging_outputs)
         ntokens = sum(log.get('ntokens', 0) for log in logging_outputs)
         nsentences = sum(log.get('nsentences', 0) for log in logging_outputs)
@@ -126,6 +135,16 @@ class Wav2vecCriterion(FairseqCriterion):
 
         scaled_loss = loss_sum / sample_size / math.log(2)
         metrics.log_scalar('loss', scaled_loss, round=3)
+
+        # loss_sum = utils.item(sum(log.get('loss', 0) for log in logging_outputs))
+        # ntokens = utils.item(sum(log.get('ntokens', 0) for log in logging_outputs))
+        # nsentences = utils.item(sum(log.get('nsentences', 0) for log in logging_outputs))
+        # sample_size = utils.item(sum(log.get('sample_size', 0) for log in logging_outputs))
+
+        # metrics.log_scalar('loss', loss_sum / sample_size / math.log(2), sample_size, round=3)
+
+
+
         metrics.log_scalar('ntokens', ntokens)
         metrics.log_scalar('nsentences', nsentences)
 
@@ -140,7 +159,10 @@ class Wav2vecCriterion(FairseqCriterion):
             metrics.log_derived(
                 "accuracy",
                 #lambda meters: round(meters["_correct"].sum / meters["_total"].sum, 5)
-                lambda meters: meters["_correct"].sum / meters["_total"].sum
+                # lambda meters: meters["_correct"].sum / meters["_total"].sum
+                # debug-tpu
+                lambda meters: meters["_correct"].sum.true_divide(meters["_total"].sum)
+                # lambda meters: safe_round(meters["_correct"].sum / meters["_total"].sum, 5)
                 if meters["_total"].sum > 0
                 else float("nan"),
             )
@@ -151,10 +173,14 @@ class Wav2vecCriterion(FairseqCriterion):
             if k not in builtin_keys:
                 val = sum(log.get(k, 0) for log in logging_outputs) / len(logging_outputs)
                 if k.startswith('loss'):
+                    # debug-tpu
                     scaled_loss = val / sample_size / math.log(2)
                     metrics.log_scalar(k, scaled_loss)
+                    # metrics.log_scalar(k, val / sample_size / math.log(2), sample_size)
                 else:
+                    # debug-tpu
                     metrics.log_scalar(k, val)
+                    # metrics.log_scalar(k, val, round=3)
 
     @staticmethod
     def logging_outputs_can_be_summed() -> bool:
@@ -163,4 +189,6 @@ class Wav2vecCriterion(FairseqCriterion):
         across workers prior to calling `reduce_metrics`. Setting this
         to True will improves distributed training speed.
         """
+        # debug-tpu
         return True
+        # return False

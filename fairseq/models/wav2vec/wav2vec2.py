@@ -405,22 +405,47 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         return cls(args)
 
-    def apply_mask(self, x, padding_mask):
+    def apply_mask(self, x, padding_mask, mask_indices=None):
         B, T, C = x.shape
         if self.mask_prob > 0:
-            mask_indices = compute_mask_indices(
-                (B, T),
-                padding_mask,
-                self.mask_prob,
-                self.mask_length,
-                self.mask_selection,
-                self.mask_other,
-                min_masks=2,
-                no_overlap=self.no_mask_overlap,
-                min_space=self.mask_min_space,
-            )
-            mask_indices = torch.from_numpy(mask_indices).to(x.device)
-            x[mask_indices] = self.mask_emb
+            # print(f"DEBUG_MESSAGE: masking params B = {B}, T = {T}, C = {C}, padding_mask = {padding_mask.size()}")
+            if mask_indices is None:
+                print(f"DEBUG_MESSAGE: recompute mask_indices")
+                mask_indices = compute_mask_indices(
+                    (B, T),
+                    padding_mask,
+                    self.mask_prob,
+                    self.mask_length,
+                    self.mask_selection,
+                    self.mask_other,
+                    min_masks=2,
+                    no_overlap=self.no_mask_overlap,
+                    min_space=self.mask_min_space,
+                )
+            # print(f"DEBUG_MESSAGE: masking params mask_indices.shape = {mask_indices.shape}")
+            # from fairseq import pdb; pdb.set_trace()
+            # (Pdb) x.size()
+            # torch.Size([1, 781, 768])
+            # (Pdb) mask_indices.shape
+            # (1, 781)
+            # (Pdb) B
+            # 1
+            # (Pdb) T
+            # 781
+            # (Pdb) self.mask_emb.size()
+            # torch.Size([768])
+            # from fairseq import pdb; pdb.set_trace()
+            # mask_indices = torch.from_numpy(mask_indices).to(x.device)
+            # mask_indices_mm = mask_indices.unsqueeze(-1).expand(-1, -1, C)
+            # mask_emb_mm = self.mask_emb.expand([B, T, C])
+            # x_mm = x.clone()
+            # x_mm = x_mm * (~mask_indices_mm) + mask_emb_mm * mask_indices_mm
+
+            # x[mask_indices] = self.mask_emb
+            # print((x == x_mm).all())
+            old_mask_indices = torch.from_numpy(mask_indices).to(x.device)
+            mask_indices = torch.from_numpy(mask_indices).unsqueeze(-1).expand(-1, -1, C).to(x.device)
+            x = x * (~mask_indices) + self.mask_emb.expand([B, T, C]) * mask_indices
         else:
             mask_indices = None
 
@@ -443,7 +468,7 @@ class Wav2Vec2Model(BaseFairseqModel):
             )
             x[mask_channel_indices] = 0
 
-        return x, mask_indices
+        return x, old_mask_indices
 
     def sample_negatives(self, y, num):
 
@@ -513,15 +538,19 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         logits =  logits / self.logit_temp
 
-        #if neg_is_pos.any():
+        # debug-tpu
         if False:
+        # if neg_is_pos.any():        
             logits[1:][neg_is_pos] = float("-inf")
 
         return logits
-
-    def forward(self, source, padding_mask=None, mask=False, features_only=False):
-        from fairseq import pdb
-
+    
+    # debug-tpu
+    # def forward(self, source, padding_mask=None, mask=False, features_only=False):
+    def forward(self, source, mask_indices=None, padding_mask=None, mask=True, features_only=False):
+    # def forward(self, source, padding_mask=None, mask=True, features_only=False):
+        # from fairseq import pdb; pdb.set_trace()
+        # print(f"DEBUG_MESSAGE, forward - source.size() = {source.size()}, mask_indices.shape = {mask_indices.shape}")
         if self.feature_grad_mult > 0:
             features = self.feature_extractor(source)
             if self.feature_grad_mult != 1.0:
@@ -534,9 +563,13 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         features = features.transpose(1, 2)
         features = self.layer_norm(features)
+        # debug-tpu
         unmasked_features = features
+        # unmasked_features = features.clone()
+        # print(f"DEBUG_MESSAGE: padding_mask.size(1) = {padding_mask.size(1)}, features.size(1) = {features.size(1)}")
 
         if padding_mask is not None:
+            # print(f"DEBUG_MESSAGE: modify padding_mask")
             extra = padding_mask.size(1) % features.size(1)
             if extra > 0:
                 padding_mask = padding_mask[:, :-extra]
@@ -566,10 +599,24 @@ class Wav2Vec2Model(BaseFairseqModel):
         from fairseq.metsumm import metsumm
         metsumm("Before mask...")
 
-        #if mask:
-        if False:
-            x, mask_indices = self.apply_mask(features, padding_mask)
-            if mask_indices is not None:
+        # debug-tpu
+        # if False:
+        if mask:
+            print("DEBUG_MESSAGE: masking applied")
+            x, mask_indices = self.apply_mask(features, padding_mask, mask_indices)
+
+            # debug-tpu
+            if False:
+            # if mask_indices is not None:
+                # from fairseq import pdb; pdb.set_trace()
+                # (Pdb) pp mask_indices.size()
+                # torch.Size([1, 781])
+                # (Pdb) pp unmasked_features.size()
+                # torch.Size([1, 781, 512])
+                # (Pdb) pp unmasked_features[mask_indices].size()
+                # torch.Size([403, 512])
+                # (Pdb) pp unmasked_features[mask_indices].view(unmasked_features.size(0), -1, unmasked_features.size(-1)).size()
+                # torch.Size([1, 403, 512])
                 y = unmasked_features[mask_indices].view(unmasked_features.size(0), -1, unmasked_features.size(-1))
             else:
                 y = unmasked_features
@@ -586,6 +633,7 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         metsumm("Before quantizer...")
         if self.quantizer:
+            # print(f"DEBUG_MESSAGE: y.size() = {y.size()}")
             q = self.quantizer(y, produce_targets=False)
             y = q["x"]
             num_vars = q["num_vars"]
@@ -622,8 +670,10 @@ class Wav2Vec2Model(BaseFairseqModel):
                 negs, _ = self.sample_negatives(y, y.size(1))
 
         metsumm("After quantizer...")
-        #x = x[mask_indices].view(x.size(0), -1, x.size(-1))
+        # debug-tpu
         x = x.view(x.size(0), -1, x.size(-1))
+        # x = x[mask_indices].view(x.size(0), -1, x.size(-1))
+        
 
         metsumm("Before Negs ...")
         if self.target_glu:
@@ -640,8 +690,9 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         result = {"x": x, "padding_mask": padding_mask, "features_pen": features_pen}
 
-        #if prob_ppl is not None:
+        # debug-tpu
         if True:
+        # if prob_ppl is not None:
             result["prob_perplexity"] = prob_ppl
             result["code_perplexity"] = code_ppl
             result["num_vars"] = num_vars
@@ -668,6 +719,10 @@ class Wav2Vec2Model(BaseFairseqModel):
 
     def get_targets(self, sample, net_output, expand_steps=True):
         x = net_output["x"]
+        return x.new_zeros(x.size(1) * x.size(2), dtype=torch.long)
+
+    def get_targets_no_mask(self, sample, net_output, expand_steps=True):
+        x_no_mask = net_output["x_no_mask"]
         return x.new_zeros(x.size(1) * x.size(2), dtype=torch.long)
 
     def get_extra_losses(self, net_output):
@@ -825,6 +880,10 @@ class TransformerEncoder(nn.Module):
         return x
 
     def extract_features(self, x, padding_mask=None):
+
+        # debug-tpu-delete
+        # if padding_mask is not None:
+        #     x[padding_mask] = 0
 
         x_conv = self.pos_conv(x.transpose(1, 2))
         x_conv = x_conv.transpose(1, 2)
@@ -1010,7 +1069,9 @@ def base_architecture(args):
     args.mask_min_space = getattr(args, "mask_min_space", 1)
 
     args.mask_channel_length = getattr(args, "mask_channel_length", 10)
-    args.mask_channel_prob = getattr(args, "mask_channel_prob", 0.65)
+    # debug-tpu
+    # args.mask_channel_prob = getattr(args, "mask_channel_prob", 0.65)
+    args.mask_channel_prob = getattr(args, "mask_channel_prob", 0)
     args.mask_channel_selection = getattr(args, "mask_channel_selection", "static")
     args.mask_channel_other = getattr(args, "mask_channel_other", 0)
     args.no_mask_channel_overlap = getattr(args, "no_mask_channel_overlap", False)

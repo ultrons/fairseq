@@ -68,8 +68,10 @@ def main(args):
     model = task.build_model(args)
     criterion = task.build_criterion(args)
     logger.info(model)
+    logger.info("task: {} ({})".format(args.task, task.__class__.__name__))
+    logger.info("model: {} ({})".format(args.arch, model.__class__.__name__))
     logger.info(
-        "model {}, criterion {}".format(args.arch, criterion.__class__.__name__)
+        "criterion: {} ({})".format(args.criterion, criterion.__class__.__name__)
     )
     logger.info(
         "num. model params: {} (num. trained: {})".format(
@@ -259,7 +261,7 @@ def validate_and_save(args, trainer, task, epoch_itr, valid_subsets, end_of_epoc
     do_validate = (
         (not end_of_epoch and do_save)  # validate during mid-epoch saves
         or (end_of_epoch and epoch_itr.epoch % args.validate_interval == 0)
-        or (args.validate_interval_updates > 0 and num_updates % args.validate_interval_updates == 0)
+        or (args.validate_interval_updates > 0 and num_updates > 0 and num_updates % args.validate_interval_updates == 0)
     ) and not args.disable_validation
 
     # Validate

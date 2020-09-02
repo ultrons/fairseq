@@ -350,7 +350,7 @@ class Trainer(object):
             num_shards=self.data_parallel_world_size if shard_batch_itr else 1,
             shard_id=self.data_parallel_rank if shard_batch_itr else 0,
             num_workers=self.args.num_workers,
-            epoch=epoch
+            epoch=epoch,
         )
 
     def get_valid_iterator(
@@ -371,11 +371,13 @@ class Trainer(object):
             seed=self.args.seed,
             num_shards=self.data_parallel_world_size,
             shard_id=self.data_parallel_rank,
-            num_workers=self.args.num_workers
+            num_workers=self.args.num_workers,
         )
 
     def begin_epoch(self, epoch):
         """Called at the beginning of each epoch."""
+        logger.info("begin training epoch {}".format(epoch))
+
         if self.quantizer is not None:
             self.quantizer.begin_epoch(epoch)
 
@@ -907,7 +909,13 @@ class Trainer(object):
 
             def is_consistent(tensor):
                 max_abs_diff = torch.max(torch.abs(tensor - tensor[0]))
+                # debug-tpu
                 return (max_abs_diff / (tensor[0] + 1e-6) < 1e-6).all()
+
+                # return (
+                #     not torch.isfinite(tensor).any()
+                #     or (max_abs_diff / (tensor[0] + 1e-6) < 1e-6).all()
+                # )
 
             if not is_consistent(self._grad_norm_buf):
                 pretty_detail = "\n".join(
@@ -926,8 +934,9 @@ class Trainer(object):
                 )
 
     def _reduce_and_log_stats(self, logging_outputs, sample_size, grad_norm=None):
-        #if grad_norm is not None:
+        # debug-tpu
         if False:
+        # if grad_norm is not None:        
             metrics.log_speed("ups", 1., priority=100, round=2)
             metrics.log_scalar("gnorm", grad_norm, priority=400, round=3)
             if self.args.clip_norm > 0:
