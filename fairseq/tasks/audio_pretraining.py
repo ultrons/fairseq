@@ -123,7 +123,8 @@ class AudioPretrainingTask(FairseqTask):
             normalize=self.args.normalize,
             # debug-tpu
             batch_shapes=self.args.batch_shapes,
-            num_batch_buckets=self.args.num_batch_buckets
+            num_batch_buckets=self.args.num_batch_buckets,
+            args=self.args,
         )
 
         if self.args.labels:

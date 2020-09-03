@@ -402,6 +402,4 @@ def compute_mask_indices(
             left_mask.append(l_mask)
             right_mask.append(r_mask)
 
-    # from fairseq import pdb; pdb.set_trace()
-    print("debug")
     return mask, np.array(left_mask), np.array(right_mask)

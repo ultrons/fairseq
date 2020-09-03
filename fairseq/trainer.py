@@ -717,6 +717,9 @@ class Trainer(object):
         elif name == "wps":
             m = metrics.get_meter("train", "wps")
             return m or meters.TimeMeter()
+        elif name == "inputwps":
+            m = metrics.get_meter("train", "inputwps")
+            return m or meters.TimeMeter()
         elif name in {"valid_loss", "valid_nll_loss"}:
             # support for legacy train.py, which assumed these meters
             # are always initialized
@@ -972,7 +975,7 @@ class Trainer(object):
             else:
                 logging_output = agg.get_smoothed_values()
                 logging_output["sample_size"] = sample_size
-                for key_to_delete in ["ppl", "wps", "wpb", "bsz"]:
+                for key_to_delete in ["ppl", "wps", "inputwps", "wpb", "bsz"]:
                     if key_to_delete in logging_output:
                         del logging_output[key_to_delete]
             return logging_output

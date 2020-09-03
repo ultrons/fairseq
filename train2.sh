@@ -1,16 +1,16 @@
-TAG=$1
+TAG=12
 #/usr/share/torch-xla-nightly/pytorch/xla/scripts/debug_run.py \
 # --tidy --outfile /tmp/debug_run_${TAG}_`date +%d%m%y_%H_%M_%S`.tar.gz -- python -u \
 python \
  train.py \
- /home/sivaibhav/wav2vec/manifest \
- --tpu \
-	 --distributed-world-size 8 \
+ /home/mtian/wav2vec/manifest \
+--tpu \
+--distributed-world-size 1 \
 --max-update 4000 \
 --batch-shapes '[(8, 250000)]' \
 --enable-padding \
 --log-interval 1 \
---encoder-layers $1 \
+--encoder-layers 12 \
 --num-workers 6 \
 --task audio_pretraining \
 --criterion wav2vec \
@@ -33,6 +33,7 @@ python \
 --mask-prob 0.65 \
 --mask-selection static \
 --mask-other 0 \
+--mask-channel-prob 0.65 \
 --encoder-layerdrop 0.05 \
 --dropout-input 0.1 \
 --dropout-features 0.1 \

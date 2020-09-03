@@ -86,6 +86,7 @@ class Wav2vecCriterion(FairseqCriterion):
             # debug-tpu
             'loss': loss,
             # 'loss': loss.item() if reduce else loss,
+            "ninputtokens": sample['net_input']['source'].numel(),
             'ntokens': sample_size,
             'nsentences': sample['id'].numel(),
             'sample_size': sample_size,
@@ -130,6 +131,7 @@ class Wav2vecCriterion(FairseqCriterion):
         # debug-tpu
         loss_sum = sum(log.get('loss', 0) for log in logging_outputs)
         ntokens = sum(log.get('ntokens', 0) for log in logging_outputs)
+        ninputtokens = sum(log.get('ninputtokens', 0) for log in logging_outputs)
         nsentences = sum(log.get('nsentences', 0) for log in logging_outputs)
         sample_size = sum(log.get('sample_size', 0) for log in logging_outputs)
 
@@ -146,6 +148,7 @@ class Wav2vecCriterion(FairseqCriterion):
 
 
         metrics.log_scalar('ntokens', ntokens)
+        metrics.log_scalar('ninputtokens', ninputtokens)
         metrics.log_scalar('nsentences', nsentences)
 
         correct = sum(log.get("correct", 0) for log in logging_outputs)
@@ -167,7 +170,7 @@ class Wav2vecCriterion(FairseqCriterion):
                 else float("nan"),
             )
 
-        builtin_keys = {'loss', 'ntokens', 'nsentences', 'sample_size', 'correct', 'count'}
+        builtin_keys = {'loss', 'ntokens', 'ninputtokens', 'nsentences', 'sample_size', 'correct', 'count'}
 
         for k in logging_outputs[0]:
             if k not in builtin_keys:

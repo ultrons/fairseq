@@ -30,6 +30,7 @@ train.py \
 --mask-prob 0.65 \
 --mask-selection static \
 --mask-other 0 \
+--mask-channel-prob 0.65 \
 --encoder-layerdrop 0.05 \
 --dropout-input 0.1 \
 --dropout-features 0.1 \

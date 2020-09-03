@@ -402,8 +402,10 @@ class FairseqTask(object):
             )
         else:
             ntokens = sum(log.get("ntokens", 0) for log in logging_outputs)
+            ninputtokens = sum(log.get("ninputtokens", 0) for log in logging_outputs)
             metrics.log_scalar("wpb", ntokens, priority=180, round=1)
             metrics.log_speed("wps", ntokens, priority=90, round=1)
+            metrics.log_speed("inputwps", ninputtokens, priority=90, round=1)
 
         if not any("nsentences" in log for log in logging_outputs):
             warnings.warn(

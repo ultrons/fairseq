@@ -30,9 +30,10 @@ class RawAudioDataset(FairseqDataset):
         pad=True,
         # pad=False,
         normalize=False,
+        args=None
     ):
         super().__init__()
-
+        self.args = args
         self.sample_rate = sample_rate
         self.sizes = []
         self.max_sample_size = (
@@ -123,20 +124,14 @@ class RawAudioDataset(FairseqDataset):
         
         # debug-tpu
         # if False:
-        if False:
+        if True:
             # replace with static mask and re-test
             # it's also possible that TPU hates different number of "TRUE" in masking
             # also wps without masking is not a good metric, because the way it's computed.
             # compute mask indices here at data collater instead of model forward path
             # DEBUG_MESSAGE: masking params B = 1, T = 781, C = 768, padding_mask = torch.Size([1, 781])
             # DEBUG_MESSAGE: masking params mask_indices.shape = (1, 781)
-            B, T = len(sources), 781
-            mask_prob = 0.65
-            mask_length = 10
-            mask_selection = "static"
-            mask_other = 0
-            no_mask_overlap = False
-            mask_min_space = 1
+            B, T, C = len(sources), 781, 768
             feature_padding_mask = None
             if padding_mask is not None:
                 extra = padding_mask.size(1) % T
@@ -145,19 +140,36 @@ class RawAudioDataset(FairseqDataset):
                 feature_padding_mask = feature_padding_mask.view(feature_padding_mask.size(0), T, -1)
                 feature_padding_mask = feature_padding_mask.all(-1)
 
-            mask_indices, _, _ = compute_mask_indices(
+            # compute mask
+            mask_indices, left_mask, right_mask = compute_mask_indices(
                 (B, T),
                 feature_padding_mask,
-                mask_prob,
-                mask_length,
-                mask_selection,
-                mask_other,
+                self.args.mask_prob,
+                self.args.mask_length,
+                self.args.mask_selection,
+                self.args.mask_other,
                 min_masks=2,
-                no_overlap=no_mask_overlap,
-                min_space=mask_min_space,
+                no_overlap=self.args.no_mask_overlap,
+                min_space=self.args.mask_min_space,
             )
+
+            # compute channel mask
+            mask_channel_indices, _, _ = compute_mask_indices(
+                (B, C),
+                None,
+                self.args.mask_channel_prob,
+                self.args.mask_channel_length,
+                self.args.mask_channel_selection,
+                self.args.mask_channel_other,
+                no_overlap=self.args.no_mask_channel_overlap,
+                min_space=self.args.mask_channel_min_space,
+            )
+
             # print(f"DEBUG_MESSAGE: data collater called: collated_sources.size() = {collated_sources.size()}, B = {B}, T = {T}, padding_mask.size() = {padding_mask.size()}, mask_indices.shape = {mask_indices.shape}")
             input["mask_indices"] = mask_indices
+            input["left_mask"] = left_mask
+            input["right_mask"] = right_mask
+            input["mask_channel_indices"] = mask_channel_indices
         return {"id": torch.LongTensor([s["id"] for s in samples]), "net_input": input}
 
     def num_tokens(self, index):
@@ -196,7 +208,8 @@ class FileAudioDataset(RawAudioDataset):
         normalize=False,
         # debug-tpu
         batch_shapes=None,
-        num_batch_buckets=0
+        num_batch_buckets=0,
+        args=None,
     ):
         super().__init__(
             sample_rate=sample_rate,
@@ -206,6 +219,7 @@ class FileAudioDataset(RawAudioDataset):
             min_length=min_length,
             pad=pad,
             normalize=normalize,
+            args=args,
         )
         # debug-tpu
         self.num_batch_buckets = num_batch_buckets
