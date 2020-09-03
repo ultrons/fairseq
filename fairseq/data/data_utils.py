@@ -282,7 +282,7 @@ def compute_mask_indices(
         min_masks: int = 0,
         no_overlap: bool = False,
         min_space: int = 0,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Computes random mask spans for a given shape
 
@@ -387,9 +387,21 @@ def compute_mask_indices(
         mask_idcs.append(np.unique(mask_idc[mask_idc < sz]))
 
     min_len = min([len(m) for m in mask_idcs])
+    left_mask = []
+    right_mask = []
     for i, mask_idc in enumerate(mask_idcs):
         if len(mask_idc) > min_len:
             mask_idc = np.random.choice(mask_idc, min_len, replace=False)
+                
         mask[i, mask_idc] = True
+        for idc in np.sort(mask_idc):
+            l_mask = [False] * bsz
+            l_mask[i] = True
+            r_mask = [False] * all_sz
+            r_mask[idc] = True
+            left_mask.append(l_mask)
+            right_mask.append(r_mask)
 
-    return mask
+    # from fairseq import pdb; pdb.set_trace()
+    print("debug")
+    return mask, np.array(left_mask), np.array(right_mask)

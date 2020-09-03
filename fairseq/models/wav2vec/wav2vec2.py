@@ -407,11 +407,12 @@ class Wav2Vec2Model(BaseFairseqModel):
 
     def apply_mask(self, x, padding_mask, mask_indices=None):
         B, T, C = x.shape
+        mask_indices = None
         if self.mask_prob > 0:
             # print(f"DEBUG_MESSAGE: masking params B = {B}, T = {T}, C = {C}, padding_mask = {padding_mask.size()}")
             if mask_indices is None:
                 print(f"DEBUG_MESSAGE: recompute mask_indices")
-                mask_indices = compute_mask_indices(
+                mask_indices, left_mask, right_mask = compute_mask_indices(
                     (B, T),
                     padding_mask,
                     self.mask_prob,
@@ -444,13 +445,25 @@ class Wav2Vec2Model(BaseFairseqModel):
             # x[mask_indices] = self.mask_emb
             # print((x == x_mm).all())
             old_mask_indices = torch.from_numpy(mask_indices).to(x.device)
+            old_x = x.clone()
+            old_x[old_mask_indices] = self.mask_emb
+            # left_mask: num_true * 1 * B
+            left_mask = torch.from_numpy(left_mask).unsqueeze(-1).transpose(1, 2).to(x.device)
+            # right_mask: num_true * T * 1
+            right_mask = torch.from_numpy(right_mask).unsqueeze(-1).to(x.device)
             mask_indices = torch.from_numpy(mask_indices).unsqueeze(-1).expand(-1, -1, C).to(x.device)
             x = x * (~mask_indices) + self.mask_emb.expand([B, T, C]) * mask_indices
+
+            if not (old_x == x).all():
+                from fairseq import pdb; pdb.set_trace()
         else:
+            old_mask_indices = None
             mask_indices = None
+            left_mask = None
+            right_mask = None
 
         if self.mask_channel_prob > 0:
-            mask_channel_indices = compute_mask_indices(
+            mask_channel_indices, _, _ = compute_mask_indices(
                 (B, C),
                 None,
                 self.mask_channel_prob,
@@ -468,7 +481,7 @@ class Wav2Vec2Model(BaseFairseqModel):
             )
             x[mask_channel_indices] = 0
 
-        return x, old_mask_indices
+        return x, old_mask_indices, left_mask, right_mask
 
     def sample_negatives(self, y, num):
 
@@ -537,11 +550,31 @@ class Wav2Vec2Model(BaseFairseqModel):
         logits = torch.cosine_similarity(x.float(), targets.float(), dim=-1).type_as(x)
 
         logits =  logits / self.logit_temp
-
         # debug-tpu
-        if False:
-        # if neg_is_pos.any():        
-            logits[1:][neg_is_pos] = float("-inf")
+        # if False:
+        if neg_is_pos.any():
+            # from fairseq import pdb; pdb.set_trace()
+            # (Pdb) pp neg_is_pos.size()
+            # torch.Size([100, 1, 403])
+            # (Pdb) pp y.size()
+            # torch.Size([1, 1, 403, 256])
+            # (Pdb) pp logits[1:].size()
+            # torch.Size([100, 1, 403])
+            # (Pdb) pp logits[1:][neg_is_pos].size()
+            # torch.Size([12])
+            # (Pdb) pp negatives.size()
+            # torch.Size([100, 1, 403, 256])
+
+            old_logits = logits.clone()
+            old_logits[1:][neg_is_pos] = float("-inf")
+
+            right_mask = float("-inf") * neg_is_pos
+            logits[1:] = logits[1:] * (~neg_is_pos) + torch.where(torch.isnan(right_mask), torch.zeros_like(right_mask), right_mask)
+
+            if not (old_logits == logits).all():
+                from fairseq import pdb; pdb.set_trace()
+
+            # print("debug")
 
         return logits
     
@@ -603,11 +636,11 @@ class Wav2Vec2Model(BaseFairseqModel):
         # if False:
         if mask:
             print("DEBUG_MESSAGE: masking applied")
-            x, mask_indices = self.apply_mask(features, padding_mask, mask_indices)
+            x, mask_indices, left_mask, right_mask = self.apply_mask(features, padding_mask, mask_indices)
 
             # debug-tpu
-            if False:
-            # if mask_indices is not None:
+            # if True:
+            if mask_indices is not None:
                 # from fairseq import pdb; pdb.set_trace()
                 # (Pdb) pp mask_indices.size()
                 # torch.Size([1, 781])
@@ -617,7 +650,50 @@ class Wav2Vec2Model(BaseFairseqModel):
                 # torch.Size([403, 512])
                 # (Pdb) pp unmasked_features[mask_indices].view(unmasked_features.size(0), -1, unmasked_features.size(-1)).size()
                 # torch.Size([1, 403, 512])
-                y = unmasked_features[mask_indices].view(unmasked_features.size(0), -1, unmasked_features.size(-1))
+                # from fairseq import pdb; pdb.set_trace()
+                # (Pdb) pp unmasked_features.size()
+                # torch.Size([1, 781, 512])
+                # (Pdb) pp mask_indices.size()
+                # torch.Size([1, 781])
+                # (Pdb) unmasked_features[mask_indices].size()
+                # torch.Size([403, 512])
+                # (Pdb) pp left_mask.size()
+                # torch.Size([403, 1, 1])
+                # (Pdb) pp right_mask.size()
+                # torch.Size([403, 781, 1])
+
+                
+                # bsz, T, C = unmasked_features.size()
+                # torch.Size([1, 781, 512])
+                # num_true = left_mask.size(0)
+                # unmasked_features.transpose(0,2).transpose(1,2).repeat(num_true, 1, 1).size()
+                # torch.Size([206336, 1, 781])
+                # left_mask.repeat(C, 1, 1).size()
+                # torch.Size([206336, 1, 1])
+                # right_mask.repeat(C, 1, 1).size()
+                # torch.Size([206336, 781, 1])
+                # xxx = torch.bmm(torch.bmm(left_mask.repeat(C, 1, 1).type(torch.float), unmasked_features.transpose(0,2).transpose(1,2).repeat(num_true, 1, 1)), right_mask.repeat(C, 1, 1).type(torch.float))
+                # xxx.size()
+                # torch.Size([206336, 1, 1])
+                # xxx.view(num_true, C).squeeze().transpose(0, 1).size()
+                # torch.Size([403, 512])
+                
+                # debug-tpu
+                # yyy = torch.matmul(
+                #     torch.matmul(left_mask.unsqueeze(1).type(torch.float), unmasked_features.permute(2,0,1)), 
+                #     right_mask.unsqueeze(1).type(torch.float)
+                # ).squeeze()
+                # yyy = torch.einsum("ijkl,ikj->il", torch.einsum("ijk,ktc->ijtc", (left_mask.type(torch.float), unmasked_features)), right_mask.type(torch.float))
+                # if unmasked_features.size(0) > 1:
+                    # from fairseq import pdb; pdb.set_trace()
+                yyy = torch.einsum("nb,btc,nt->nc", left_mask.squeeze(1).type(torch.float), unmasked_features, right_mask.squeeze(-1).type(torch.float))
+                if not (yyy == unmasked_features[mask_indices]).all():
+                    from fairseq import pdb; pdb.set_trace()
+
+                y = yyy.view(unmasked_features.size(0), -1, unmasked_features.size(-1))
+                yy = unmasked_features[mask_indices].view(unmasked_features.size(0), -1, unmasked_features.size(-1))
+                if not (y == yy).all():
+                    from fairseq import pdb; pdb.set_trace()
             else:
                 y = unmasked_features
         else:
@@ -671,7 +747,26 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         metsumm("After quantizer...")
         # debug-tpu
-        x = x.view(x.size(0), -1, x.size(-1))
+        # x = x.view(x.size(0), -1, x.size(-1))
+        # from fairseq import pdb; pdb.set_trace()
+        # xxx = torch.matmul(
+        #     torch.matmul(left_mask.unsqueeze(1).type(torch.float), x.permute(2,0,1)), 
+        #     right_mask.unsqueeze(1).type(torch.float)
+        # ).squeeze()
+
+        # if x.size(0) > 1:
+        #     from fairseq import pdb; pdb.set_trace()
+        xxx = torch.einsum("nb,btc,nt->nc", left_mask.squeeze(1).type(torch.float), x, right_mask.squeeze(-1).type(torch.float))
+
+        if not (xxx == x[mask_indices]).all():
+            from fairseq import pdb; pdb.set_trace()
+        
+        xx = x[mask_indices].view(x.size(0), -1, x.size(-1))
+        x = xxx.view(x.size(0), -1, x.size(-1))
+        
+        if not (x == xx).all():
+            from fairseq import pdb; pdb.set_trace()
+
         # x = x[mask_indices].view(x.size(0), -1, x.size(-1))
         
 

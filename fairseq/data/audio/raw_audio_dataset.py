@@ -123,7 +123,7 @@ class RawAudioDataset(FairseqDataset):
         
         # debug-tpu
         # if False:
-        if True:
+        if False:
             # replace with static mask and re-test
             # it's also possible that TPU hates different number of "TRUE" in masking
             # also wps without masking is not a good metric, because the way it's computed.
@@ -145,7 +145,7 @@ class RawAudioDataset(FairseqDataset):
                 feature_padding_mask = feature_padding_mask.view(feature_padding_mask.size(0), T, -1)
                 feature_padding_mask = feature_padding_mask.all(-1)
 
-            mask_indices = compute_mask_indices(
+            mask_indices, _, _ = compute_mask_indices(
                 (B, T),
                 feature_padding_mask,
                 mask_prob,
