@@ -3,7 +3,7 @@ TAG=12
 # --tidy --outfile /tmp/debug_run_${TAG}_`date +%d%m%y_%H_%M_%S`.tar.gz -- python -u \
 python \
  train.py \
- /home/mtian/wav2vec/manifest \
+ $HOME/wav2vec/manifest \
 --tpu \
 --distributed-world-size 1 \
 --max-update 4000 \

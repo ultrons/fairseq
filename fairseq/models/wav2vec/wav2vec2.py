@@ -454,10 +454,10 @@ class Wav2Vec2Model(BaseFairseqModel):
                 .unsqueeze(1)
                 .expand(-1, T, -1)
             )
-            old_x = x.clone()
-            old_x[mask_channel_indices] = 0
+            #old_x = x.clone()
+            #old_x[mask_channel_indices] = 0
             x = x * (~mask_channel_indices)
-            assert (old_x == x).all()
+            #assert (old_x == x).all()
             
         return x, old_mask_indices, left_mask, right_mask
 
@@ -529,8 +529,8 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         logits =  logits / self.logit_temp
         # debug-tpu
-        # if False:
-        if neg_is_pos.any():
+        if False:
+        #if neg_is_pos.any():
             old_logits = logits.clone()
             old_logits[1:][neg_is_pos] = float("-inf")
 
@@ -560,6 +560,7 @@ class Wav2Vec2Model(BaseFairseqModel):
         if padding_mask is not None:
             # print(f"DEBUG_MESSAGE: modify padding_mask")
             extra = padding_mask.size(1) % features.size(1)
+            print("DEBUG_MESSAGE: extra = ",extra)
             if extra > 0:
                 padding_mask = padding_mask[:, :-extra]
             padding_mask = padding_mask.view(padding_mask.size(0), features.size(1), -1)
@@ -603,15 +604,15 @@ class Wav2Vec2Model(BaseFairseqModel):
             # debug-tpu
             # if False:
             if mask_indices is not None:
-                old_y = unmasked_features[mask_indices].view(unmasked_features.size(0), -1, unmasked_features.size(-1))
+                #old_y = unmasked_features[mask_indices].view(unmasked_features.size(0), -1, unmasked_features.size(-1))
                 y = torch.einsum(
                     "nb,btc,nt->nc",
                     left_mask.type(torch.float),
                     unmasked_features,
                     right_mask.type(torch.float)
                 ).view(unmasked_features.size(0), -1, unmasked_features.size(-1))                
-                if not (old_y == y).all():
-                    raise RuntimeError(f"old_y = {old_y}, size = {old_y.size()}, y = {y}, size = {y.size()}")
+                #if not (old_y == y).all():
+                #   raise RuntimeError(f"old_y = {old_y}, size = {old_y.size()}, y = {y}, size = {y.size()}")
             else:
                 y = unmasked_features
         else:
@@ -664,14 +665,14 @@ class Wav2Vec2Model(BaseFairseqModel):
 
         metsumm("After quantizer...")
         # debug-tpu
-        old_x = x[mask_indices].view(x.size(0), -1, x.size(-1))        
+        #old_x = x[mask_indices].view(x.size(0), -1, x.size(-1))        
         x = torch.einsum(
             "nb,btc,nt->nc",
             left_mask.type(torch.float),
             x,
             right_mask.type(torch.float)
         ).view(x.size(0), -1, x.size(-1))
-        assert (old_x == x).all()
+        #assert (old_x == x).all()
 
         metsumm("Before Negs ...")
         if self.target_glu:
