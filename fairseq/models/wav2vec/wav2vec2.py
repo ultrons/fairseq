@@ -408,27 +408,27 @@ class Wav2Vec2Model(BaseFairseqModel):
     def apply_mask(self, x, padding_mask, mask_indices=None, mask_channel_indices=None, left_mask=None, right_mask=None):
         B, T, C = x.shape
         if self.mask_prob > 0:
-            if mask_indices is None:
-                print(f"DEBUG_MESSAGE: recompute mask_indices")
-                mask_indices, left_mask, right_mask = compute_mask_indices(
-                    (B, T),
-                    padding_mask,
-                    self.mask_prob,
-                    self.mask_length,
-                    self.mask_selection,
-                    self.mask_other,
-                    min_masks=2,
-                    no_overlap=self.no_mask_overlap,
-                    min_space=self.mask_min_space,
-                )
-            old_mask_indices = torch.from_numpy(mask_indices).to(x.device)
-            old_x = x.clone()
-            old_x[old_mask_indices] = self.mask_emb
+            #if mask_indices is None:
+            #    print(f"DEBUG_MESSAGE: recompute mask_indices")
+            #    mask_indices, left_mask, right_mask = compute_mask_indices(
+            #        (B, T),
+            #        padding_mask,
+            #        self.mask_prob,
+            #        self.mask_length,
+            #        self.mask_selection,
+            #        self.mask_other,
+            #        min_masks=2,
+            #        no_overlap=self.no_mask_overlap,
+            #        min_space=self.mask_min_space,
+            #    )
+            #old_mask_indices = torch.from_numpy(mask_indices).to(x.device)
+            #old_x = x.clone()
+            #old_x[old_mask_indices] = self.mask_emb
             left_mask = torch.from_numpy(left_mask).to(x.device)
             right_mask = torch.from_numpy(right_mask).to(x.device)
             mask_indices = torch.from_numpy(mask_indices).unsqueeze(-1).expand(-1, -1, C).to(x.device)
             x = x * (~mask_indices) + self.mask_emb.expand([B, T, C]) * mask_indices
-            assert (old_x == x).all()
+            #assert (old_x == x).all()
         else:
             old_mask_indices = None
             mask_indices = None
@@ -459,7 +459,8 @@ class Wav2Vec2Model(BaseFairseqModel):
             x = x * (~mask_channel_indices)
             #assert (old_x == x).all()
             
-        return x, old_mask_indices, left_mask, right_mask
+        #return x, old_mask_indices, left_mask, right_mask
+        return x, mask_indices, left_mask, right_mask
 
     def sample_negatives(self, y, num):
 
@@ -542,6 +543,8 @@ class Wav2Vec2Model(BaseFairseqModel):
     
     # debug-tpu
     def forward(self, source, mask_indices=None, mask_channel_indices=None, left_mask=None, right_mask=None, padding_mask=None, mask=True, features_only=False):
+        from fairseq import pdb
+        #pdb.set_trace()
         if self.feature_grad_mult > 0:
             features = self.feature_extractor(source)
             if self.feature_grad_mult != 1.0:
@@ -878,10 +881,10 @@ class TransformerEncoder(nn.Module):
 
         # debug-tpu-delete        
         if padding_mask is not None:
-            old_x = x.clone()
-            old_x[padding_mask] = 0
+            #old_x = x.clone()
+            #old_x[padding_mask] = 0
             x = x * (~padding_mask.unsqueeze(-1).expand(-1, -1, x.size(2)))
-            assert (old_x == x).all()
+            #assert (old_x == x).all()
 
         x_conv = self.pos_conv(x.transpose(1, 2))
         x_conv = x_conv.transpose(1, 2)
