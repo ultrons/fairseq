@@ -282,11 +282,12 @@ def validate_and_save(args, trainer, task, epoch_itr, valid_subsets, end_of_epoc
 
     # Uses hypertune to report metrics for hyperparameter tuning.
 
-    hpt = hypertune.HyperTune()
-    hpt.report_hyperparameter_tuning_metric(
-        hyperparameter_metric_tag='avg_nll_loss',
-        metric_value=valid_losses[0],
-        global_step=trainer.get_num_updates())
+    if do_validate:
+        hpt = hypertune.HyperTune()
+        hpt.report_hyperparameter_tuning_metric(
+            hyperparameter_metric_tag='avg_nll_loss',
+            metric_value=valid_losses[0],
+            global_step=trainer.get_num_updates())
     return valid_losses, should_stop
 
 
